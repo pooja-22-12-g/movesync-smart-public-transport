@@ -43,6 +43,7 @@ from config.firebase_config import get_firebase_app, FirebaseStatus
 from sync.firebase_bridge import FirebaseSyncBridge
 from sync.auth_service import AuthenticationService, UserSession
 from sync.notification_service import NotificationService
+from sync.dataset_service import DatasetQueryService
 
 logger = logging.getLogger("BackendAPI")
 if not logger.handlers:
@@ -83,6 +84,7 @@ def health_check():
 bridge = FirebaseSyncBridge()
 auth_service = AuthenticationService()
 notification_service = NotificationService()
+dataset_service = DatasetQueryService("data/movesync_kr_market_anekal_via_electronic_city.csv", "data/route_coordinates.csv")
 
 # Seed database on startup ONLY if empty (preserves live Firestore state across restarts)
 @app.on_event("startup")
@@ -94,93 +96,85 @@ async def startup_event():
         return
 
     bridge.seed_system_config()
-    bridge.seed_routes_and_stops("data/route_coordinates.csv")
+    bridge.seed_routes_and_stops("data/route_coordinates.csv", "data/movesync_kr_market_anekal_via_electronic_city.csv")
     bridge.seed_initial_fleet()
 
-    # Populate initial operational snapshot from read-only CSV & Modules 1-6
+    # Populate initial operational snapshot from DatasetQueryService (varied stops per bus, capacity=60)
     try:
-        import pandas as pd
-        if os.path.exists("data/bus_occupancy.csv") and os.path.exists("data/route_coordinates.csv"):
-            df_occ = pd.read_csv("data/bus_occupancy.csv")
-            df_coords = pd.read_csv("data/route_coordinates.csv")
-            latest_per_bus = df_occ.groupby("bus_id").last().reset_index()
+        snapshots = dataset_service.get_bus_snapshots()
+        stops_by_id = {s["stop_id"]: s for s in dataset_service.get_all_stops()}
+        occ_records = []
+        loc_updates = []
+        alerts = []
 
-            occ_records = []
-            loc_updates = []
-            alerts = []
-            preds = []
-            for _, row in latest_per_bus.iterrows():
-                b_id = str(row["bus_id"])
-                r_id = str(row["route_id"])
-                s_id = str(row["stop_id"])
-                occ = int(min(50, max(0, int(row["current_occupancy"]))))
-                cap = 50
-                occ_records.append({
-                    "bus_id": b_id,
-                    "route_id": r_id,
-                    "stop_id": s_id,
-                    "current_occupancy": occ,
-                    "bus_capacity": cap,
-                    "boarding": int(row["boarding"]),
-                    "alighting": int(row["alighting"]),
-                    "data_provenance": "HISTORICAL_DATASET",
-                })
-                stop_match = df_coords[df_coords["stop_id"] == s_id]
-                if not stop_match.empty:
-                    lat = float(stop_match.iloc[0]["latitude"])
-                    lon = float(stop_match.iloc[0]["longitude"])
-                else:
-                    lat, lon = 12.9770, 77.5713
+        for b_id, snap in snapshots.items():
+            occ = int(snap["current_occupancy"])
+            cap = int(snap["bus_capacity"])
+            r_id = snap["route_id"]
+            s_id = snap["stop_id"]
+            s_name = snap["stop_name"]
+            occ_records.append({
+                "bus_id": b_id,
+                "route_id": r_id,
+                "stop_id": s_id,
+                "stop_name": s_name,
+                "stop_sequence": snap["stop_sequence"],
+                "trip_id": snap["trip_id"],
+                "current_occupancy": occ,
+                "bus_capacity": cap,
+                "boarding": snap["boarding"],
+                "alighting": snap["alighting"],
+                "data_provenance": "SYNTHETIC_DATASET_SNAPSHOT",
+            })
+
+            stop_meta = stops_by_id.get(s_id)
+            if stop_meta and stop_meta.get("gps_available") and stop_meta.get("latitude") is not None:
                 loc_updates.append({
                     "bus_id": b_id,
                     "route_id": r_id,
-                    "latitude": lat,
-                    "longitude": lon,
+                    "latitude": stop_meta["latitude"],
+                    "longitude": stop_meta["longitude"],
                     "heading": 90.0,
                     "speed_kmh": 24.0,
                     "next_stop_id": s_id,
                     "estimated_arrival_mins": 4.0,
-                    "data_provenance": "INTERPOLATED_GPS_WAYPOINTS",
+                    "data_provenance": "SURVEYED_GPS",
                 })
-                occ_pct = round((occ / cap) * 100.0, 1)
-                if occ_pct >= 70.0:
-                    alerts.append({
-                        "alert_id": f"ALERT_{b_id}_{s_id}",
-                        "bus_id": b_id,
-                        "route_id": r_id,
-                        "stop_id": s_id,
-                        "alert_level": "CRITICAL" if occ_pct >= 90.0 else "WARNING",
-                        "current_occupancy": occ,
-                        "capacity": cap,
-                        "occupancy_pct": occ_pct,
-                    })
-                preds.append({
+
+            occ_pct = round((occ / cap) * 100.0, 1) if cap > 0 else 0.0
+            if occ_pct >= 70.0:
+                alerts.append({
+                    "alert_id": f"ALERT_{b_id}_{s_id}",
                     "bus_id": b_id,
                     "route_id": r_id,
-                    "current_stop_id": s_id,
+                    "stop_id": s_id,
+                    "alert_level": "CRITICAL" if occ_pct >= 90.0 else "WARNING",
                     "current_occupancy": occ,
-                    "lookahead_forecasts": [
-                        {"step_ahead": 1, "target_stop_id": s_id, "target_stop_name": f"Next Stop (+1)", "predicted_occupancy": float(min(50, occ + 2)), "predicted_occupancy_rounded": min(50, occ + 2), "predicted_status": "CRITICAL" if occ + 2 >= 45 else ("WARNING" if occ + 2 >= 35 else "NORMAL")},
-                        {"step_ahead": 2, "target_stop_id": s_id, "target_stop_name": f"Stop +2", "predicted_occupancy": float(min(50, occ + 1)), "predicted_occupancy_rounded": min(50, occ + 1), "predicted_status": "CRITICAL" if occ + 1 >= 45 else ("WARNING" if occ + 1 >= 35 else "NORMAL")},
-                        {"step_ahead": 3, "target_stop_id": s_id, "target_stop_name": f"Stop +3", "predicted_occupancy": float(max(0, occ - 2)), "predicted_occupancy_rounded": max(0, occ - 2), "predicted_status": "CRITICAL" if occ - 2 >= 45 else ("WARNING" if occ - 2 >= 35 else "NORMAL")},
-                    ],
-                    "model_version": "random_forest_occupancy_v1",
+                    "capacity": cap,
+                    "occupancy_pct": occ_pct,
                 })
 
-            bridge.sync_occupancy_and_telemetry(occ_records)
+        bridge.sync_occupancy_and_telemetry(occ_records)
+        if loc_updates:
             bridge.sync_bus_locations(loc_updates)
+        if alerts:
             bridge.sync_crowding_alerts(alerts)
-            bridge.sync_multi_stop_predictions(preds)
 
-            schedules = [
-                {"route_id": r, "day_type": "WEEKDAY", "peak_headway_mins": 10 if r in ["R205", "R330"] else 12, "off_peak_headway_mins": 20, "total_daily_departures": 69 if r in ["R205", "R330"] else 65}
-                for r in ["R047", "R101", "R205", "R330"]
-            ]
-            dispatches = [
-                {"recommendation_id": "DISP_R205_001", "route_id": "R205", "source_bus_id": "KA-BUS-006", "recommended_relief_bus_id": "KA-BUS-019", "priority": "CRITICAL", "recommended_action": "Deploy relief unit KA-BUS-019 on Corridor R205", "authority_decision": "PENDING"},
-                {"recommendation_id": "DISP_R330_002", "route_id": "R330", "source_bus_id": "KA-BUS-016", "recommended_relief_bus_id": "KA-BUS-020", "priority": "HIGH", "recommended_action": "Deploy relief unit KA-BUS-020 on Corridor R330", "authority_decision": "PENDING"},
-            ]
-            bridge.sync_schedules_and_dispatches(schedules, dispatches)
+        for b_id, snap in snapshots.items():
+            bridge.db.collection("buses").document(b_id).set({
+                "last_stop_name": snap["stop_name"],
+                "last_stop_id": snap["stop_id"],
+                "current_trip_id": str(snap["trip_id"]),
+            }, merge=True)
+
+        schedules = [
+            {"route_id": "KR_MARKET_ANEKAL_VIA_ECITY", "day_type": "WEEKDAY", "peak_headway_mins": 10, "off_peak_headway_mins": 20, "total_daily_departures": 69}
+        ]
+        dispatches = [
+            {"recommendation_id": "DISP_KMA_001", "route_id": "KR_MARKET_ANEKAL_VIA_ECITY", "source_bus_id": "KA-BUS-006", "recommended_relief_bus_id": "KA-BUS-019", "priority": "CRITICAL", "recommended_action": "Deploy relief unit KA-BUS-019 on KR Market -> Anekal corridor", "authority_decision": "PENDING"},
+            {"recommendation_id": "DISP_KMA_002", "route_id": "KR_MARKET_ANEKAL_VIA_ECITY", "source_bus_id": "KA-BUS-016", "recommended_relief_bus_id": "KA-BUS-020", "priority": "HIGH", "recommended_action": "Deploy relief unit KA-BUS-020 on KR Market -> Anekal corridor", "authority_decision": "PENDING"},
+        ]
+        bridge.sync_schedules_and_dispatches(schedules, dispatches)
     except Exception as e:
         logger.warning(f"Startup operational snapshot seeding skipped: {e}")
 
@@ -208,6 +202,10 @@ class CountingSessionRequest(BaseModel):
     session_id: str
     boarding_count: int = Field(..., ge=0)
     alighting_count: int = Field(..., ge=0)
+
+class SaveTripRequest(BaseModel):
+    source_stop: str
+    destination_stop: str
 
 class HardwareTelemetryPacket(BaseModel):
     bus_id: str
@@ -547,9 +545,9 @@ def get_fuel_summary(session: UserSession = Depends(require_authority)):
 def get_nearby_stops(
     lat: float = Query(..., description="Passenger latitude"),
     lon: float = Query(..., description="Passenger longitude"),
-    radius_km: float = Query(5.0, ge=0.1, le=50.0),
+    radius_km: float = Query(15.0, ge=0.1, le=50.0),
 ):
-    """Find surveyed bus stops near passenger coordinates using Haversine distance."""
+    """Find surveyed bus stops near passenger coordinates (only for stops with verified GPS coordinates)."""
     import math
     def haversine(lat1, lon1, lat2, lon2):
         r = 6371.0
@@ -559,69 +557,110 @@ def get_nearby_stops(
         a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
         return 2 * r * math.asin(math.sqrt(a))
 
-    buses_by_route: Dict[str, List[Dict[str, Any]]] = {}
-    for b_doc in bridge.db.collection("buses").stream():
-        b = b_doc.to_dict()
-        if b.get("status") == "IN_SERVICE" and b.get("current_route_id"):
-            buses_by_route.setdefault(b["current_route_id"], []).append({
-                "bus_id": b["bus_id"],
-                "current_occupancy": b.get("current_occupancy", 0),
-                "capacity": b.get("capacity", 50),
-                "occupancy_status": b.get("occupancy_status", "NORMAL"),
-            })
-
     nearby = []
-    for r_doc in bridge.db.collection("routes").stream():
-        r = r_doc.to_dict()
-        r_id = r.get("route_id", "")
-        for stop in r.get("stops", []):
-            dist = haversine(lat, lon, float(stop["latitude"]), float(stop["longitude"]))
-            if dist <= radius_km:
-                route_buses = buses_by_route.get(r_id, [])
-                eta_mins = round(max(2.0, dist * 4.5), 1) if route_buses else None
-                nearby.append({
-                    "stop_id": stop["stop_id"],
-                    "stop_name": stop["stop_name"],
-                    "stop_order": stop["stop_order"],
-                    "latitude": stop["latitude"],
-                    "longitude": stop["longitude"],
-                    "distance_km": round(dist, 2),
-                    "routes": [r_id],
-                    "serving_buses": route_buses,
-                    "next_arrival_mins": eta_mins,
-                    "data_provenance": "SURVEYED_STOPS_WITH_SIMULATED_ETA" if eta_mins else "SURVEYED_STOPS",
-                })
-
+    for stop in dataset_service.get_all_stops():
+        if not stop.get("gps_available") or stop.get("latitude") is None or stop.get("longitude") is None:
+            continue
+        dist = haversine(lat, lon, float(stop["latitude"]), float(stop["longitude"]))
+        if dist <= radius_km:
+            nearby.append({
+                "stop_id": stop["stop_id"],
+                "stop_name": stop["stop_name"],
+                "stop_order": stop["stop_sequence"],
+                "latitude": stop["latitude"],
+                "longitude": stop["longitude"],
+                "distance_km": round(dist, 2),
+                "routes": [stop["route_id"]],
+                "serving_buses": [],
+                "next_arrival_mins": None,
+                "data_provenance": "SURVEYED_GPS",
+            })
     nearby.sort(key=lambda x: x["distance_km"])
     return {"count": len(nearby), "stops": nearby}
 
 
 @app.get("/api/stops/search")
-def search_stops(q: str = Query("", description="Stop name or route search query")):
-    """Manual stop search fallback when GPS permission is denied."""
-    query = q.strip().lower()
-    results = []
-    for r_doc in bridge.db.collection("routes").stream():
-        r = r_doc.to_dict()
-        r_id = r.get("route_id", "")
-        for stop in r.get("stops", []):
-            if not query or query in stop["stop_name"].lower() or query in stop["stop_id"].lower() or query in r_id.lower():
-                results.append({
-                    "stop_id": stop["stop_id"],
-                    "stop_name": stop["stop_name"],
-                    "stop_order": stop["stop_order"],
-                    "latitude": stop["latitude"],
-                    "longitude": stop["longitude"],
-                    "routes": [r_id],
-                    "data_provenance": "SURVEYED_STOPS",
-                })
-    return {"count": len(results), "stops": results}
+def search_stops(q: str = Query("", description="Bus stop name query")):
+    """Unique bus stop suggestions from the 50-stop KR Market -> Anekal dataset."""
+    stops = dataset_service.search_stops(q)
+    formatted = [
+        {
+            "stop_id": s["stop_id"],
+            "stop_name": s["stop_name"],
+            "stop_order": s["stop_sequence"],
+            "latitude": s["latitude"],
+            "longitude": s["longitude"],
+            "gps_available": s["gps_available"],
+            "routes": [s["route_id"]],
+            "data_provenance": s["data_provenance"],
+        }
+        for s in stops
+    ]
+    return {"count": len(formatted), "stops": formatted}
+
+
+@app.get("/api/journeys/search")
+def search_journeys(
+    source: str = Query(..., description="Starting stop name"),
+    destination: str = Query(..., description="Destination stop name"),
+):
+    """Search actual matching buses and trips serving source -> destination in sequence."""
+    return dataset_service.search_journeys(source, destination)
+
+
+@app.post("/api/trips/save")
+def save_trip(req: SaveTripRequest, session: UserSession = Depends(get_current_user)):
+    """Save a passenger's planned journey (source_stop -> destination_stop) to Firestore."""
+    journey_res = dataset_service.search_journeys(req.source_stop, req.destination_stop)
+    trip_id = f"SAVED_{session.uid}_{int(time.time() * 1000)}"
+    doc = {
+        "saved_trip_id": trip_id,
+        "uid": session.uid,
+        "source_stop": req.source_stop.strip(),
+        "destination_stop": req.destination_stop.strip(),
+        "valid": journey_res.get("valid", False),
+        "created_at": time.time(),
+    }
+    bridge.db.collection("saved_trips").document(trip_id).set(doc)
+    return {"status": "success", "saved_trip": doc, "matching_journeys": journey_res}
+
+
+@app.get("/api/trips/saved")
+def get_saved_trips(session: UserSession = Depends(get_current_user)):
+    """Retrieve user's saved trips along with actual dataset matching buses for each saved journey."""
+    trips = []
+    for doc in bridge.db.collection("saved_trips").stream():
+        t = doc.to_dict()
+        if t.get("uid") == session.uid:
+            matches = dataset_service.search_journeys(t["source_stop"], t["destination_stop"])
+            trips.append({
+                "saved_trip_id": t["saved_trip_id"],
+                "source_stop": t["source_stop"],
+                "destination_stop": t["destination_stop"],
+                "created_at": t.get("created_at"),
+                "valid": matches.get("valid", False),
+                "message": matches.get("message"),
+                "intermediate_stops": matches.get("intermediate_stops", []),
+                "matching_buses": matches.get("journeys", []),
+            })
+    trips.sort(key=lambda x: float(x.get("created_at") or 0), reverse=True)
+    return {"count": len(trips), "saved_trips": trips}
+
+
+@app.get("/api/buses/{bus_id}/upcoming-stops")
+def get_bus_upcoming_stops(
+    bus_id: str,
+    trip_id: Optional[int] = Query(None),
+    current_stop_seq: Optional[int] = Query(None),
+):
+    """Return actual upcoming stop names, expected boarding, alighting, occupancy, and less-crowded alternatives."""
+    return dataset_service.get_bus_upcoming_stops(bus_id, trip_id=trip_id, current_stop_seq=current_stop_seq)
 
 
 @app.get("/api/authority/route-demand")
 def get_route_demand(session: UserSession = Depends(require_authority)):
     from scheduling.route_demand_analyzer import RouteDemandAnalyzer
-    analyzer = RouteDemandAnalyzer("data/bus_occupancy.csv")
+    analyzer = RouteDemandAnalyzer("data/movesync_kr_market_anekal_via_electronic_city.csv")
     profiles = analyzer.get_route_demand_summary()
     return {
         "status": "success",

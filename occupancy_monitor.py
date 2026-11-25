@@ -27,7 +27,7 @@ from datetime import datetime
 # CONSTANTS
 # ──────────────────────────────────────────────────────────────────────────────
 
-DATA_PATH = os.path.join(os.path.dirname(__file__), "data", "bus_occupancy.csv")
+DATA_PATH = os.path.join(os.path.dirname(__file__), "data", "movesync_kr_market_anekal_via_electronic_city.csv")
 
 # Occupancy thresholds (percentage)
 STATUS_NORMAL_BELOW  = 85.0   # < 85 %  → Normal

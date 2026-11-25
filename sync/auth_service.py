@@ -116,7 +116,7 @@ class AuthenticationService:
             else:
                 for d in col.stream():
                     data = d.to_dict()
-                    if str(data.get("email", "")).lower() == email_clean:
+                    if str(data.get("email", "")).strip().lower() == email_clean:
                         return data
         except Exception as e:
             logger.error(f"Error querying user by email: {type(e).__name__}")
@@ -192,7 +192,7 @@ class AuthenticationService:
         if self._find_user_by_email(email_clean):
             return False, "User with this email already exists.", None
 
-        uid = f"usr_{final_role}_{int(time.time() * 1000)}"
+        uid = f"usr_{final_role}_{int(time.time() * 1000)}_{secrets.token_hex(2)}"
         user_record = {
             "uid": uid,
             "email": email_clean,

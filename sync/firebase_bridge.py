@@ -40,8 +40,8 @@ if not logger.handlers:
 logger.setLevel(logging.INFO)
 
 # Operational Constants
-VALID_ROUTES = ["R047", "R101", "R205", "R330"]
-STANDARD_CAPACITY = 50
+VALID_ROUTES = ["KR_MARKET_ANEKAL_VIA_ECITY", "R047", "R101", "R205", "R330"]
+STANDARD_CAPACITY = 60
 WARNING_THRESHOLD_PCT = 70.0
 CRITICAL_THRESHOLD_PCT = 90.0
 
@@ -119,65 +119,63 @@ class FirebaseSyncBridge:
             logger.error(f"Failed to seed system configuration: {e}")
             return False
 
-    def seed_routes_and_stops(self, csv_coords_path: str = "data/route_coordinates.csv") -> int:
-        """Seed routes and stops from route_coordinates.csv without modifying it."""
+    def seed_routes_and_stops(self, csv_coords_path: str = "data/route_coordinates.csv", dataset_path: str = "data/movesync_kr_market_anekal_via_electronic_city.csv") -> int:
+        """Seed routes and stops from the active dataset, attaching verified GPS coordinates only where available."""
+        coord_lookup: Dict[str, Dict[str, float]] = {}
+        if os.path.exists(csv_coords_path):
+            df_coords = pd.read_csv(csv_coords_path)
+            for _, crow in df_coords.iterrows():
+                coord_lookup[str(crow["stop_name"]).strip().lower()] = {
+                    "latitude": float(crow["latitude"]),
+                    "longitude": float(crow["longitude"]),
+                }
+
+        if os.path.exists(dataset_path):
+            df_occ = pd.read_csv(dataset_path, usecols=lambda c: c in ["route_id", "stop_id", "stop_name", "stop_sequence"])
+            if "stop_name" in df_occ.columns and "stop_sequence" in df_occ.columns:
+                count = 0
+                for route_id, group in df_occ.groupby("route_id"):
+                    unique_stops = group[["stop_id", "stop_name", "stop_sequence"]].drop_duplicates().sort_values("stop_sequence")
+                    stops_list = []
+                    for _, row in unique_stops.iterrows():
+                        s_name = str(row["stop_name"]).strip()
+                        coords = coord_lookup.get(s_name.lower())
+                        stops_list.append({
+                            "stop_id": str(row["stop_id"]),
+                            "stop_order": int(row["stop_sequence"]),
+                            "stop_name": s_name,
+                            "latitude": coords["latitude"] if coords else None,
+                            "longitude": coords["longitude"] if coords else None,
+                            "gps_available": coords is not None,
+                            "data_provenance": "SURVEYED_GPS" if coords else "DATASET_STOP_SEQUENCE_NO_GPS",
+                        })
+                    route_doc = {
+                        "route_id": str(route_id),
+                        "route_name": f"{stops_list[0]['stop_name']} → {stops_list[-1]['stop_name']}",
+                        "demand_profile": "HIGH_DEMAND",
+                        "base_cycle_time_mins": 95,
+                        "total_stops": len(stops_list),
+                        "stops": stops_list,
+                        "data_provenance": "DATASET_ROUTE_SEQUENCE",
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                    self.db.collection("routes").document(str(route_id)).set(route_doc)
+                    count += 1
+                self._sync_stats["routes_seeded"] = count
+                logger.info(f"Successfully seeded {count} route(s) from {dataset_path}.")
+                return count
+
         if not os.path.exists(csv_coords_path):
             logger.error(f"Route coordinates file not found at {csv_coords_path}")
             return 0
-
-        df_coords = pd.read_csv(csv_coords_path)
-        routes_grouped = df_coords.groupby("route_id")
-
-        count = 0
-        for route_id, group in routes_grouped:
-            sorted_stops = group.sort_values("stop_order")
-            stops_list = []
-            for _, row in sorted_stops.iterrows():
-                stops_list.append({
-                    "stop_id": str(row["stop_id"]),
-                    "stop_order": int(row["stop_order"]),
-                    "stop_name": str(row["stop_name"]),
-                    "latitude": float(row["latitude"]),
-                    "longitude": float(row["longitude"]),
-                    "data_provenance": "GEOGRAPHIC_SURVEY_GROUND_TRUTH"
-                })
-
-            demand_profile = "HIGH_DEMAND" if route_id in ["R205", "R330"] else "MODERATE_DEMAND"
-            route_doc = {
-                "route_id": str(route_id),
-                "route_name": f"Corridor {route_id} ({stops_list[0]['stop_name']} -> {stops_list[-1]['stop_name']})",
-                "demand_profile": demand_profile,
-                "base_cycle_time_mins": 60,
-                "total_stops": len(stops_list),
-                "stops": stops_list,
-                "data_provenance": "TRANSIT_AUTHORITY_TOPOGRAPHY",
-                "updated_at": datetime.now(timezone.utc).isoformat()
-            }
-
-            self.db.collection("routes").document(str(route_id)).set(route_doc)
-            count += 1
-
-        self._sync_stats["routes_seeded"] = count
-        logger.info(f"Successfully seeded {count} routes with {len(df_coords)} total stops.")
-        return count
+        return 0
 
     def seed_initial_fleet(self) -> int:
         """Seed 20 fleet vehicles (KA-BUS-001 to KA-BUS-020)."""
         buses = []
         for i in range(1, 21):
             bus_id = f"KA-BUS-{i:03d}"
-            # Assign initial corridors
-            if i <= 5:
-                route = "R047"
-            elif i <= 10:
-                route = "R101"
-            elif i <= 15:
-                route = "R205"
-            elif i <= 18:
-                route = "R330"
-            else:
-                route = None # Standby depot relief units
-
+            route = "KR_MARKET_ANEKAL_VIA_ECITY" if i <= 18 else None
             status = "IN_SERVICE" if route else "STANDBY_DEPOT"
             bus_doc = {
                 "bus_id": bus_id,
@@ -186,13 +184,13 @@ class FirebaseSyncBridge:
                 "warning_threshold": int(STANDARD_CAPACITY * (WARNING_THRESHOLD_PCT / 100)),
                 "critical_threshold": int(STANDARD_CAPACITY * (CRITICAL_THRESHOLD_PCT / 100)),
                 "current_route_id": route,
-                "current_trip_id": f"TRIP_{route}_01" if route else None,
+                "current_trip_id": None,
                 "status": status,
                 "current_occupancy": 0,
                 "occupancy_pct": 0.0,
                 "occupancy_status": "NORMAL",
-                "last_stop_id": f"{route}-S01" if route else "DEPOT_CENTRAL",
-                "last_stop_name": "Terminal" if route else "Central Depot",
+                "last_stop_id": "S01" if route else "DEPOT_CENTRAL",
+                "last_stop_name": "KR Market (Kalasipalya)" if route else "Central Depot",
                 "is_relief_bus": i in [19, 20],
                 "data_provenance": "FLEET_REGISTRY_SEED",
                 "updated_at": datetime.now(timezone.utc).isoformat()

@@ -22,8 +22,8 @@ from typing import Dict, List, Any, Optional, Tuple
 import pandas as pd
 import numpy as np
 
-CSV_PATH = os.path.join("data", "bus_occupancy.csv")
-VALID_ROUTES = ["R047", "R101", "R205", "R330"]
+CSV_PATH = os.path.join("data", "movesync_kr_market_anekal_via_electronic_city.csv")
+VALID_ROUTES = ["KR_MARKET_ANEKAL_VIA_ECITY", "R047", "R101", "R205", "R330"]
 DEFAULT_CAPACITY = 60
 WARNING_OCCUPANCY = 51   # 85% of 60
 CRITICAL_OCCUPANCY = 60  # 100% of 60
@@ -104,10 +104,11 @@ class RouteDemandAnalyzer:
 
     def get_route_demand_summary(self, route_id: Optional[str] = None) -> Dict[str, RouteDemandProfile]:
         """
-        Calculates demand profiles for all routes or a specific target route.
+        Calculates demand profiles for all routes in the dataset or a specific target route.
         """
         df = self._load_data()
-        routes = [route_id] if route_id and route_id in VALID_ROUTES else VALID_ROUTES
+        available_routes = sorted(df["route_id"].dropna().astype(str).unique().tolist())
+        routes = [route_id] if route_id and route_id in available_routes else available_routes
         results: Dict[str, RouteDemandProfile] = {}
 
         for r in routes:

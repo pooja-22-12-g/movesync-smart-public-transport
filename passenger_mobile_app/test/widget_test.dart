@@ -14,8 +14,10 @@ void main() {
       ),
     );
 
-    // Verify MoveSync branding on unified login screen
+    // Verify MoveSync branding and Passenger/Authority login options
     expect(find.text('MoveSync'), findsOneWidget);
     expect(find.text('Smart Mobility. Better Journeys.'), findsOneWidget);
+    expect(find.text('Passenger Login'), findsOneWidget);
+    expect(find.text('Authority Login'), findsOneWidget);
   });
 }

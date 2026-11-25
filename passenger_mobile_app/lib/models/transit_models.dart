@@ -422,3 +422,272 @@ class PassengerCountingSummary {
   }
 }
 
+class JourneyOption {
+  final String busId;
+  final String tripId;
+  final String routeId;
+  final String boardingStop;
+  final String boardingStopId;
+  final int boardingSequence;
+  final String destinationStop;
+  final String destinationStopId;
+  final int destinationSequence;
+  final String boardingTime;
+  final String destinationTime;
+  final int currentOccupancy;
+  final int busCapacity;
+  final double occupancyPct;
+  final String crowdStatus;
+  final List<String> intermediateStops;
+  final String dataProvenance;
+
+  JourneyOption({
+    required this.busId,
+    required this.tripId,
+    required this.routeId,
+    required this.boardingStop,
+    required this.boardingStopId,
+    required this.boardingSequence,
+    required this.destinationStop,
+    required this.destinationStopId,
+    required this.destinationSequence,
+    required this.boardingTime,
+    required this.destinationTime,
+    required this.currentOccupancy,
+    required this.busCapacity,
+    required this.occupancyPct,
+    required this.crowdStatus,
+    required this.intermediateStops,
+    required this.dataProvenance,
+  });
+
+  factory JourneyOption.fromJson(Map<String, dynamic> json) {
+    return JourneyOption(
+      busId: json['bus_id'] ?? '',
+      tripId: json['trip_id'] ?? '',
+      routeId: json['route_id'] ?? '',
+      boardingStop: json['boarding_stop'] ?? '',
+      boardingStopId: json['boarding_stop_id'] ?? '',
+      boardingSequence: json['boarding_sequence'] ?? 0,
+      destinationStop: json['destination_stop'] ?? '',
+      destinationStopId: json['destination_stop_id'] ?? '',
+      destinationSequence: json['destination_sequence'] ?? 0,
+      boardingTime: json['boarding_time'] ?? '',
+      destinationTime: json['destination_time'] ?? '',
+      currentOccupancy: json['current_occupancy'] ?? 0,
+      busCapacity: json['bus_capacity'] ?? 60,
+      occupancyPct: (json['occupancy_pct'] is num)
+          ? (json['occupancy_pct'] as num).toDouble()
+          : 0.0,
+      crowdStatus: json['crowd_status'] ?? 'Low',
+      intermediateStops: List<String>.from(json['intermediate_stops'] ?? []),
+      dataProvenance: json['data_provenance'] ?? 'DATASET_HISTORICAL_SIMULATION',
+    );
+  }
+}
+
+class JourneySearchResult {
+  final bool valid;
+  final String? message;
+  final String sourceStop;
+  final String destinationStop;
+  final List<String> intermediateStops;
+  final int count;
+  final List<JourneyOption> journeys;
+
+  JourneySearchResult({
+    required this.valid,
+    this.message,
+    required this.sourceStop,
+    required this.destinationStop,
+    required this.intermediateStops,
+    required this.count,
+    required this.journeys,
+  });
+
+  factory JourneySearchResult.fromJson(Map<String, dynamic> json) {
+    final rawJourneys = json['journeys'] as List? ?? [];
+    return JourneySearchResult(
+      valid: json['valid'] ?? false,
+      message: json['message'],
+      sourceStop: json['source_stop'] ?? '',
+      destinationStop: json['destination_stop'] ?? '',
+      intermediateStops: List<String>.from(json['intermediate_stops'] ?? []),
+      count: json['count'] ?? rawJourneys.length,
+      journeys: rawJourneys.map((j) => JourneyOption.fromJson(j)).toList(),
+    );
+  }
+}
+
+class SavedTrip {
+  final String savedTripId;
+  final String sourceStop;
+  final String destinationStop;
+  final String createdAt;
+  final bool valid;
+  final String? message;
+  final List<String> intermediateStops;
+  final List<JourneyOption> matchingBuses;
+
+  SavedTrip({
+    required this.savedTripId,
+    required this.sourceStop,
+    required this.destinationStop,
+    required this.createdAt,
+    required this.valid,
+    this.message,
+    required this.intermediateStops,
+    required this.matchingBuses,
+  });
+
+  factory SavedTrip.fromJson(Map<String, dynamic> json) {
+    final rawBuses = json['matching_buses'] as List? ?? [];
+    return SavedTrip(
+      savedTripId: json['saved_trip_id'] ?? '',
+      sourceStop: json['source_stop'] ?? '',
+      destinationStop: json['destination_stop'] ?? '',
+      createdAt: json['created_at'] ?? '',
+      valid: json['valid'] ?? true,
+      message: json['message'],
+      intermediateStops: List<String>.from(json['intermediate_stops'] ?? []),
+      matchingBuses: rawBuses.map((j) => JourneyOption.fromJson(j)).toList(),
+    );
+  }
+}
+
+class UpcomingStop {
+  final String stopId;
+  final String stopName;
+  final int stopSequence;
+  final int expectedBoarding;
+  final int expectedAlighting;
+  final int expectedOccupancy;
+  final int busCapacity;
+  final double occupancyPct;
+  final String crowdStatus;
+  final String expectedTime;
+  final bool isNextStop;
+
+  UpcomingStop({
+    required this.stopId,
+    required this.stopName,
+    required this.stopSequence,
+    required this.expectedBoarding,
+    required this.expectedAlighting,
+    required this.expectedOccupancy,
+    required this.busCapacity,
+    required this.occupancyPct,
+    required this.crowdStatus,
+    required this.expectedTime,
+    required this.isNextStop,
+  });
+
+  factory UpcomingStop.fromJson(Map<String, dynamic> json) {
+    return UpcomingStop(
+      stopId: json['stop_id'] ?? '',
+      stopName: json['stop_name'] ?? '',
+      stopSequence: json['stop_sequence'] ?? 0,
+      expectedBoarding: json['expected_boarding'] ?? 0,
+      expectedAlighting: json['expected_alighting'] ?? 0,
+      expectedOccupancy: json['expected_occupancy'] ?? 0,
+      busCapacity: json['bus_capacity'] ?? 60,
+      occupancyPct: (json['occupancy_pct'] is num)
+          ? (json['occupancy_pct'] as num).toDouble()
+          : 0.0,
+      crowdStatus: json['crowd_status'] ?? 'Low',
+      expectedTime: json['expected_time'] ?? '',
+      isNextStop: json['is_next_stop'] ?? false,
+    );
+  }
+}
+
+class LessCrowdedAlternative {
+  final String busId;
+  final String routeId;
+  final String currentStop;
+  final int currentOccupancy;
+  final int busCapacity;
+  final double occupancyPct;
+  final String crowdStatus;
+
+  LessCrowdedAlternative({
+    required this.busId,
+    required this.routeId,
+    required this.currentStop,
+    required this.currentOccupancy,
+    required this.busCapacity,
+    required this.occupancyPct,
+    required this.crowdStatus,
+  });
+
+  factory LessCrowdedAlternative.fromJson(Map<String, dynamic> json) {
+    return LessCrowdedAlternative(
+      busId: json['bus_id'] ?? '',
+      routeId: json['route_id'] ?? '',
+      currentStop: json['current_stop'] ?? '',
+      currentOccupancy: json['current_occupancy'] ?? 0,
+      busCapacity: json['bus_capacity'] ?? 60,
+      occupancyPct: (json['occupancy_pct'] is num)
+          ? (json['occupancy_pct'] as num).toDouble()
+          : 0.0,
+      crowdStatus: json['crowd_status'] ?? 'Low',
+    );
+  }
+}
+
+class BusUpcomingResponse {
+  final String busId;
+  final String tripId;
+  final String routeId;
+  final String currentStopId;
+  final String currentStopName;
+  final int currentStopSequence;
+  final int currentOccupancy;
+  final int busCapacity;
+  final double occupancyPct;
+  final String crowdStatus;
+  final String dataProvenance;
+  final List<UpcomingStop> upcomingStops;
+  final List<LessCrowdedAlternative> lessCrowdedAlternatives;
+
+  BusUpcomingResponse({
+    required this.busId,
+    required this.tripId,
+    required this.routeId,
+    required this.currentStopId,
+    required this.currentStopName,
+    required this.currentStopSequence,
+    required this.currentOccupancy,
+    required this.busCapacity,
+    required this.occupancyPct,
+    required this.crowdStatus,
+    required this.dataProvenance,
+    required this.upcomingStops,
+    required this.lessCrowdedAlternatives,
+  });
+
+  factory BusUpcomingResponse.fromJson(Map<String, dynamic> json) {
+    final rawUpcoming = json['upcoming_stops'] as List? ?? [];
+    final rawAlt = json['less_crowded_alternatives'] as List? ?? [];
+    return BusUpcomingResponse(
+      busId: json['bus_id'] ?? '',
+      tripId: json['trip_id'] ?? '',
+      routeId: json['route_id'] ?? '',
+      currentStopId: json['current_stop_id'] ?? '',
+      currentStopName: json['current_stop_name'] ?? '',
+      currentStopSequence: json['current_stop_sequence'] ?? 0,
+      currentOccupancy: json['current_occupancy'] ?? 0,
+      busCapacity: json['bus_capacity'] ?? 60,
+      occupancyPct: (json['occupancy_pct'] is num)
+          ? (json['occupancy_pct'] as num).toDouble()
+          : 0.0,
+      crowdStatus: json['crowd_status'] ?? 'Low',
+      dataProvenance: json['data_provenance'] ?? 'DATASET_HISTORICAL_SIMULATION',
+      upcomingStops: rawUpcoming.map((s) => UpcomingStop.fromJson(s)).toList(),
+      lessCrowdedAlternatives: rawAlt
+          .map((a) => LessCrowdedAlternative.fromJson(a))
+          .toList(),
+    );
+  }
+}
+

@@ -40,8 +40,8 @@ from passenger_counting.occupancy_integrator import (
     DEFAULT_BUS_CAPACITY,
 )
 
-CSV_PATH = os.path.join("data", "bus_occupancy.csv")
-VALID_ROUTES = ["R047", "R101", "R205", "R330"]
+CSV_PATH = os.path.join("data", "movesync_kr_market_anekal_via_electronic_city.csv")
+VALID_ROUTES = ["KR_MARKET_ANEKAL_VIA_ECITY", "R047", "R101", "R205", "R330"]
 
 
 @dataclass

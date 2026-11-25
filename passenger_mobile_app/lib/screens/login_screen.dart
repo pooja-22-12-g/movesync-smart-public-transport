@@ -12,10 +12,11 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _emailController = TextEditingController(text: 'passenger@demo.com');
-  final _passwordController = TextEditingController(text: 'pass123');
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
   final _nameController = TextEditingController();
   bool _isRegistering = false;
+  bool _isAuthorityMode = false;
 
   void _submit() async {
     if (!_formKey.currentState!.validate()) return;
@@ -23,7 +24,7 @@ class _LoginScreenState extends State<LoginScreen> {
     final email = _emailController.text.trim();
     final password = _passwordController.text.trim();
 
-    if (_isRegistering) {
+    if (_isRegistering && !_isAuthorityMode) {
       final success = await provider.register(email, password, _nameController.text.trim());
       if (!success && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -31,7 +32,11 @@ class _LoginScreenState extends State<LoginScreen> {
         );
       }
     } else {
-      final success = await provider.login(email, password);
+      final success = await provider.login(
+        email,
+        password,
+        requireAuthority: _isAuthorityMode,
+      );
       if (!success && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(provider.errorMessage ?? 'Login failed')),
@@ -108,15 +113,60 @@ class _LoginScreenState extends State<LoginScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: ChoiceChip(
+                                label: const Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(Icons.person_outline, size: 16),
+                                    SizedBox(width: 6),
+                                    Text('Passenger Login'),
+                                  ],
+                                ),
+                                selected: !_isAuthorityMode,
+                                selectedColor: MoveSyncTheme.teal.withValues(alpha: 0.18),
+                                onSelected: (_) => setState(() {
+                                  _isAuthorityMode = false;
+                                }),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: ChoiceChip(
+                                label: const Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(Icons.admin_panel_settings_outlined, size: 16),
+                                    SizedBox(width: 6),
+                                    Text('Authority Login'),
+                                  ],
+                                ),
+                                selected: _isAuthorityMode,
+                                selectedColor: MoveSyncTheme.navy.withValues(alpha: 0.18),
+                                onSelected: (_) => setState(() {
+                                  _isAuthorityMode = true;
+                                  _isRegistering = false;
+                                }),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
                         Text(
-                          _isRegistering ? 'Create Passenger Account' : 'Sign In to MoveSync',
+                          _isAuthorityMode
+                              ? 'Authority Portal Sign In'
+                              : (_isRegistering ? 'Create Passenger Account' : 'Passenger Sign In'),
                           style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: MoveSyncTheme.navy),
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          _isRegistering
-                              ? 'Public registration is for passengers. Authority accounts are provisioned by an administrator.'
-                              : 'Passengers and authorized transit staff sign in here.',
+                          _isAuthorityMode
+                              ? 'Authorized transit staff only. Passenger accounts cannot access the Authority Dashboard.'
+                              : (_isRegistering
+                                  ? 'Public registration is for passengers only.'
+                                  : 'Sign in with your MoveSync passenger account to search stops & plan journeys.'),
                           style: const TextStyle(fontSize: 12, color: Colors.black54),
                         ),
                         const SizedBox(height: 18),
@@ -166,17 +216,24 @@ class _LoginScreenState extends State<LoginScreen> {
                                     height: 20,
                                     child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
                                   )
-                                : Text(_isRegistering ? 'Register as Passenger' : 'Sign In', style: const TextStyle(fontSize: 15)),
+                                : Text(
+                                    _isAuthorityMode
+                                        ? 'Sign In to Authority Portal'
+                                        : (_isRegistering ? 'Register as Passenger' : 'Sign In'),
+                                    style: const TextStyle(fontSize: 15),
+                                  ),
                           ),
                         ),
-                        const SizedBox(height: 10),
-                        TextButton(
-                          onPressed: () => setState(() => _isRegistering = !_isRegistering),
-                          child: Text(
-                            _isRegistering ? 'Already have an account? Sign In' : 'New commuter? Create an account',
-                            style: const TextStyle(color: MoveSyncTheme.teal, fontWeight: FontWeight.w600),
+                        if (!_isAuthorityMode) ...[
+                          const SizedBox(height: 10),
+                          TextButton(
+                            onPressed: () => setState(() => _isRegistering = !_isRegistering),
+                            child: Text(
+                              _isRegistering ? 'Already have an account? Sign In' : 'New commuter? Create an account',
+                              style: const TextStyle(color: MoveSyncTheme.teal, fontWeight: FontWeight.w600),
+                            ),
                           ),
-                        ),
+                        ],
                       ],
                     ),
                   ),

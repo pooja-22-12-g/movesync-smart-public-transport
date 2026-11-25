@@ -13,18 +13,42 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  String _searchQuery = '';
+  String _selectedStopQuery = '';
+  final TextEditingController _stopSearchController = TextEditingController();
+
+  @override
+  void dispose() {
+    _stopSearchController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final provider = Provider.of<TransitProvider>(context);
     final userName = provider.currentUser?.displayName ?? 'Commuter';
 
-    final filteredBuses = provider.buses.where((b) {
-      final idMatch = b.busId.toLowerCase().contains(_searchQuery.toLowerCase());
-      final routeMatch = (b.currentRouteId ?? '').toLowerCase().contains(_searchQuery.toLowerCase());
-      return idMatch || routeMatch;
-    }).toList();
+    final stopNames = <String>{
+      ...provider.allStops.map((s) => s.stopName),
+      ...provider.routes.expand((r) => r.stops.map((s) => s.stopName)),
+    }.where((name) => name.trim().isNotEmpty).toList();
+
+    final query = _selectedStopQuery.trim().toLowerCase();
+    final matchingRouteIds = query.isEmpty
+        ? <String>{}
+        : provider.routes
+            .where((r) => r.stops.any((s) => s.stopName.toLowerCase().contains(query)))
+            .map((r) => r.routeId)
+            .toSet();
+
+    final filteredBuses = query.isEmpty
+        ? provider.buses
+        : provider.buses.where((b) {
+            final routeId = b.currentRouteId ?? '';
+            if (matchingRouteIds.isNotEmpty) {
+              return matchingRouteIds.contains(routeId);
+            }
+            return b.busId.toLowerCase().contains(query);
+          }).toList();
 
     return Scaffold(
       appBar: AppBar(
@@ -61,17 +85,69 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   const SizedBox(height: 10),
 
-                  // Search Bar
-                  TextField(
-                    onChanged: (val) => setState(() => _searchQuery = val),
-                    decoration: InputDecoration(
-                      hintText: 'Search bus number (KA-BUS-001) or route (R101)...',
-                      prefixIcon: const Icon(Icons.search),
-                      filled: true,
-                      fillColor: Colors.white,
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                    ),
+                  // Searchable Bus Stop Name Autocomplete
+                  Autocomplete<String>(
+                    optionsBuilder: (TextEditingValue textEditingValue) {
+                      final q = textEditingValue.text.trim().toLowerCase();
+                      if (q.isEmpty) return stopNames;
+                      return stopNames.where((s) => s.toLowerCase().contains(q));
+                    },
+                    onSelected: (String selection) {
+                      setState(() {
+                        _selectedStopQuery = selection;
+                        _stopSearchController.text = selection;
+                      });
+                    },
+                    fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
+                      if (_stopSearchController.text.isNotEmpty && controller.text != _stopSearchController.text) {
+                        controller.text = _stopSearchController.text;
+                      }
+                      return TextField(
+                        controller: controller,
+                        focusNode: focusNode,
+                        onChanged: (val) {
+                          _stopSearchController.text = val;
+                          setState(() => _selectedStopQuery = val);
+                        },
+                        decoration: InputDecoration(
+                          hintText: 'Search bus stop (e.g. KR Market, Madiwala, Electronic City)...',
+                          prefixIcon: const Icon(Icons.search),
+                          suffixIcon: _selectedStopQuery.isNotEmpty
+                              ? IconButton(
+                                  icon: const Icon(Icons.clear),
+                                  onPressed: () {
+                                    controller.clear();
+                                    _stopSearchController.clear();
+                                    setState(() => _selectedStopQuery = '');
+                                  },
+                                )
+                              : null,
+                          filled: true,
+                          fillColor: Colors.white,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide.none,
+                          ),
+                        ),
+                      );
+                    },
                   ),
+                  if (_selectedStopQuery.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        Chip(
+                          avatar: const Icon(Icons.place, size: 16, color: MoveSyncTheme.teal),
+                          label: Text('Stop: $_selectedStopQuery'),
+                          onDeleted: () {
+                            _stopSearchController.clear();
+                            setState(() => _selectedStopQuery = '');
+                          },
+                        ),
+                      ],
+                    ),
+                  ],
                   const SizedBox(height: 14),
 
                   // Travel Alerts

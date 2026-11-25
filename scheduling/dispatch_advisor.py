@@ -44,7 +44,7 @@ from passenger_counting.occupancy_integrator import (
     SEVERITY_CRITICAL,
 )
 
-CSV_PATH = os.path.join("data", "bus_occupancy.csv")
+CSV_PATH = os.path.join("data", "movesync_kr_market_anekal_via_electronic_city.csv")
 ALL_KNOWN_BUSES = [f"KA-BUS-{i:03d}" for i in range(1, 21)]
 
 

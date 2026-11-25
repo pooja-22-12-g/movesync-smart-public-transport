@@ -17,6 +17,8 @@ Supports two operational modes:
 import os
 import json
 import logging
+import tempfile
+import threading
 from typing import Optional, Dict, Any, Tuple
 from dataclasses import dataclass
 
@@ -36,16 +38,41 @@ class FirebaseStatus:
 
 
 _SHARED_MOCK_STORE: Dict[str, Dict[str, Any]] = {}
+_MOCK_USERS_FILE = os.path.join(tempfile.gettempdir(), "movesync_mock_users.json")
+_MOCK_STORE_LOCK = threading.Lock()
+
+
+def _load_mock_users_into_store(store: Dict[str, Dict[str, Any]]) -> None:
+    if os.path.exists(_MOCK_USERS_FILE):
+        try:
+            with open(_MOCK_USERS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                store.setdefault("users", {}).update(data)
+        except Exception as e:
+            logger.warning(f"Could not read mock users store ({type(e).__name__}).")
+
+
+def _save_mock_users_from_store(store: Dict[str, Dict[str, Any]]) -> None:
+    try:
+        users_data = store.get("users", {})
+        tmp_path = f"{_MOCK_USERS_FILE}.{os.getpid()}.{threading.get_ident()}.tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(users_data, f)
+        os.replace(tmp_path, _MOCK_USERS_FILE)
+    except Exception as e:
+        logger.warning(f"Could not persist mock users store ({type(e).__name__}).")
 
 
 class MockFirestoreClient:
     """
     In-memory mock client representing Cloud Firestore during local dry-run mode.
-    Uses a shared in-memory dictionary so bridge, auth, and notification services
-    see consistent state without network calls.
+    Uses a shared in-memory dictionary (with local temp-file persistence for 'users')
+    so bridge, auth, and notification services see consistent state across reloads/workers.
     """
     def __init__(self):
         self._store: Dict[str, Dict[str, Any]] = _SHARED_MOCK_STORE
+        _load_mock_users_into_store(self._store)
         logger.info("[MOCK MODE] MockFirestoreClient initialized in-memory.")
 
     def collection(self, collection_name: str):
@@ -56,6 +83,17 @@ class MockFirestoreClient:
         if len(parts) >= 2:
             return MockDocumentReference(self._store, parts[0], parts[1])
         return MockDocumentReference(self._store, path, "default")
+
+
+class MockQuery:
+    def __init__(self, docs):
+        self._docs = docs
+
+    def limit(self, n: int):
+        return MockQuery(self._docs[:n])
+
+    def stream(self):
+        return iter(self._docs)
 
 
 class MockCollectionReference:
@@ -71,8 +109,23 @@ class MockCollectionReference:
             document_id = str(uuid.uuid4())
         return MockDocumentReference(self._store, self.name, document_id)
 
+    def where(self, field: str, op: str, value: Any):
+        with _MOCK_STORE_LOCK:
+            if self.name == "users":
+                _load_mock_users_into_store(self._store)
+            items = list(self._store.get(self.name, {}).items())
+        matched = []
+        for doc_id, data in items:
+            if op == "==" and data.get(field) == value:
+                matched.append(MockDocumentSnapshot(doc_id, data, True))
+        return MockQuery(matched)
+
     def stream(self):
-        for doc_id, data in self._store.get(self.name, {}).items():
+        with _MOCK_STORE_LOCK:
+            if self.name == "users":
+                _load_mock_users_into_store(self._store)
+            items = list(self._store.get(self.name, {}).items())
+        for doc_id, data in items:
             yield MockDocumentSnapshot(doc_id, data, True)
 
 
@@ -83,23 +136,36 @@ class MockDocumentReference:
         self.id = doc_id
 
     def set(self, data: Dict[str, Any], merge: bool = False):
-        if self.collection_name not in self._store:
-            self._store[self.collection_name] = {}
-        if merge and self.id in self._store[self.collection_name]:
-            self._store[self.collection_name][self.id].update(data)
-        else:
-            self._store[self.collection_name][self.id] = dict(data)
+        with _MOCK_STORE_LOCK:
+            if self.collection_name == "users":
+                _load_mock_users_into_store(self._store)
+            if self.collection_name not in self._store:
+                self._store[self.collection_name] = {}
+            if merge and self.id in self._store[self.collection_name]:
+                self._store[self.collection_name][self.id].update(data)
+            else:
+                self._store[self.collection_name][self.id] = dict(data)
+            if self.collection_name == "users":
+                _save_mock_users_from_store(self._store)
         return {"write_time": "MOCK_TIMESTAMP"}
 
     def get(self):
-        data = self._store.get(self.collection_name, {}).get(self.id)
+        with _MOCK_STORE_LOCK:
+            if self.collection_name == "users":
+                _load_mock_users_into_store(self._store)
+            data = self._store.get(self.collection_name, {}).get(self.id)
         exists = data is not None
         return MockDocumentSnapshot(self.id, data if exists else {}, exists)
 
     def update(self, data: Dict[str, Any]):
-        if self.collection_name in self._store and self.id in self._store[self.collection_name]:
-            self._store[self.collection_name][self.id].update(data)
-            return {"write_time": "MOCK_TIMESTAMP"}
+        with _MOCK_STORE_LOCK:
+            if self.collection_name == "users":
+                _load_mock_users_into_store(self._store)
+            if self.collection_name in self._store and self.id in self._store[self.collection_name]:
+                self._store[self.collection_name][self.id].update(data)
+                if self.collection_name == "users":
+                    _save_mock_users_from_store(self._store)
+                return {"write_time": "MOCK_TIMESTAMP"}
         raise KeyError(f"Mock document {self.id} does not exist in {self.collection_name}")
 
 

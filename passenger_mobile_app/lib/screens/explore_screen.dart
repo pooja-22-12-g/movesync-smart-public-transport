@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../providers/transit_provider.dart';
 import '../theme/movesync_theme.dart';
 import 'route_details_screen.dart';
+import 'tracking_screen.dart';
 
 class ExploreScreen extends StatefulWidget {
   const ExploreScreen({super.key});
@@ -15,8 +16,18 @@ class ExploreScreen extends StatefulWidget {
 
 class _ExploreScreenState extends State<ExploreScreen> {
   final _searchController = TextEditingController();
-  String? _selectedSource;
-  String? _selectedDestination;
+  final _sourceController = TextEditingController();
+  final _destinationController = TextEditingController();
+  String _sourceText = '';
+  String _destinationText = '';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _sourceController.dispose();
+    _destinationController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -51,7 +62,10 @@ class _ExploreScreenState extends State<ExploreScreen> {
           ),
     ];
 
-    final allStopNames = provider.stopSearchResults.map((s) => s.stopName).toSet().toList()..sort();
+    final allStopNames = <String>{
+      ...provider.allStops.map((s) => s.stopName),
+      ...provider.routes.expand((r) => r.stops.map((s) => s.stopName)),
+    }.where((n) => n.trim().isNotEmpty).toList();
 
     return Scaffold(
       appBar: AppBar(
@@ -89,7 +103,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
             controller: _searchController,
             onChanged: (q) => provider.searchStops(q),
             decoration: InputDecoration(
-              hintText: 'Search bus stop or route (e.g. MG Road, R101)...',
+              hintText: 'Search stop name (e.g. KR Market, Madiwala, Electronic City)...',
               prefixIcon: const Icon(Icons.search),
               filled: true,
               fillColor: Colors.white,
@@ -117,45 +131,206 @@ class _ExploreScreenState extends State<ExploreScreen> {
           ),
           const SizedBox(height: 14),
 
-          // Source & Destination Planner
+          // Source & Destination Planner (Searchable Autocomplete)
           Card(
             child: Padding(
               padding: const EdgeInsets.all(14),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Plan Journey (Source & Destination)', style: TextStyle(fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 10),
-                  DropdownButtonFormField<String>(
-                    value: _selectedSource,
-                    isExpanded: true,
-                    decoration: const InputDecoration(labelText: 'From (Starting Stop)', border: OutlineInputBorder(), isDense: true),
-                    items: allStopNames.map((n) => DropdownMenuItem(value: n, child: Text(n, overflow: TextOverflow.ellipsis))).toList(),
-                    onChanged: (v) => setState(() => _selectedSource = v),
+                  const Text(
+                    'Plan Your Journey',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: MoveSyncTheme.navy),
                   ),
                   const SizedBox(height: 10),
-                  DropdownButtonFormField<String>(
-                    value: _selectedDestination,
-                    isExpanded: true,
-                    decoration: const InputDecoration(labelText: 'To (Destination Stop)', border: OutlineInputBorder(), isDense: true),
-                    items: allStopNames.map((n) => DropdownMenuItem(value: n, child: Text(n, overflow: TextOverflow.ellipsis))).toList(),
-                    onChanged: (v) => setState(() => _selectedDestination = v),
+                  Autocomplete<String>(
+                    optionsBuilder: (TextEditingValue val) {
+                      final q = val.text.trim().toLowerCase();
+                      if (q.isEmpty) return allStopNames;
+                      return allStopNames.where((s) => s.toLowerCase().contains(q));
+                    },
+                    onSelected: (selection) {
+                      _sourceController.text = selection;
+                      setState(() => _sourceText = selection);
+                    },
+                    fieldViewBuilder: (context, controller, focusNode, _) {
+                      if (_sourceController.text.isNotEmpty && controller.text != _sourceController.text) {
+                        controller.text = _sourceController.text;
+                      }
+                      return TextField(
+                        controller: controller,
+                        focusNode: focusNode,
+                        onChanged: (v) {
+                          _sourceController.text = v;
+                          setState(() => _sourceText = v);
+                        },
+                        decoration: const InputDecoration(
+                          labelText: 'Starting Point',
+                          hintText: 'e.g. KR Market, Madiwala, Electronic City',
+                          prefixIcon: Icon(Icons.trip_origin, color: MoveSyncTheme.green),
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                      );
+                    },
                   ),
                   const SizedBox(height: 10),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: (_selectedSource != null && _selectedDestination != null)
-                          ? () {
-                              provider.setJourneyStops(_selectedSource!, _selectedDestination!);
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text('Journey saved: $_selectedSource → $_selectedDestination')),
+                  Autocomplete<String>(
+                    optionsBuilder: (TextEditingValue val) {
+                      final q = val.text.trim().toLowerCase();
+                      if (q.isEmpty) return allStopNames;
+                      return allStopNames.where((s) => s.toLowerCase().contains(q));
+                    },
+                    onSelected: (selection) {
+                      _destinationController.text = selection;
+                      setState(() => _destinationText = selection);
+                    },
+                    fieldViewBuilder: (context, controller, focusNode, _) {
+                      if (_destinationController.text.isNotEmpty && controller.text != _destinationController.text) {
+                        controller.text = _destinationController.text;
+                      }
+                      return TextField(
+                        controller: controller,
+                        focusNode: focusNode,
+                        onChanged: (v) {
+                          _destinationController.text = v;
+                          setState(() => _destinationText = v);
+                        },
+                        decoration: const InputDecoration(
+                          labelText: 'Destination Point',
+                          hintText: 'e.g. Anekal, Chandapura, Electronic City',
+                          prefixIcon: Icon(Icons.place, color: MoveSyncTheme.red),
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          icon: const Icon(Icons.search, size: 18),
+                          label: const Text('Find Buses'),
+                          onPressed: (_sourceText.trim().isNotEmpty &&
+                                  _destinationText.trim().isNotEmpty &&
+                                  !provider.isSearchingJourneys)
+                              ? () => provider.searchJourneys(_sourceText.trim(), _destinationText.trim())
+                              : null,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      OutlinedButton.icon(
+                        icon: const Icon(Icons.bookmark_add_outlined, size: 18),
+                        label: const Text('Save Trip'),
+                        onPressed: (_sourceText.trim().isNotEmpty && _destinationText.trim().isNotEmpty)
+                            ? () async {
+                                final res = await provider.saveTrip(_sourceText.trim(), _destinationText.trim());
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        res['ok'] == true
+                                            ? 'Saved trip: ${_sourceText.trim()} → ${_destinationText.trim()}'
+                                            : (res['message']?.toString() ?? 'Could not save trip'),
+                                      ),
+                                    ),
+                                  );
+                                }
+                              }
+                            : null,
+                      ),
+                    ],
+                  ),
+                  if (provider.isSearchingJourneys) ...[
+                    const SizedBox(height: 12),
+                    const Center(child: CircularProgressIndicator()),
+                  ] else if (provider.journeySearchResult != null) ...[
+                    const SizedBox(height: 14),
+                    Builder(
+                      builder: (context) {
+                        final res = provider.journeySearchResult!;
+                        if (!res.valid || res.journeys.isEmpty) {
+                          return Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.amber.shade50,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: MoveSyncTheme.amber),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.info_outline, color: MoveSyncTheme.amber),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    res.message ?? 'No direct bus is available for this journey.',
+                                    style: const TextStyle(fontSize: 13),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '${res.sourceStop} → ${res.destinationStop} (${res.count} buses)',
+                              style: const TextStyle(fontWeight: FontWeight.bold, color: MoveSyncTheme.teal),
+                            ),
+                            if (res.intermediateStops.isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                'Via ${res.intermediateStops.length} stops: ${res.intermediateStops.take(4).join(", ")}${res.intermediateStops.length > 4 ? "..." : ""}',
+                                style: const TextStyle(fontSize: 12, color: Colors.black54),
+                              ),
+                            ],
+                            const SizedBox(height: 8),
+                            ...res.journeys.take(10).map((j) {
+                              final color = MoveSyncTheme.statusColor(
+                                j.occupancyPct >= 100
+                                    ? 'CRITICAL'
+                                    : (j.occupancyPct >= 75 ? 'WARNING' : 'NORMAL'),
                               );
-                            }
-                          : null,
-                      child: const Text('Find Routes & Save Trip'),
+                              return Card(
+                                margin: const EdgeInsets.only(bottom: 8),
+                                color: Colors.grey.shade50,
+                                child: ListTile(
+                                  leading: CircleAvatar(
+                                    backgroundColor: color.withValues(alpha: 0.14),
+                                    child: Icon(Icons.directions_bus, color: color, size: 20),
+                                  ),
+                                  title: Text('${j.busId} • ${j.crowdStatus}',
+                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                                  subtitle: Text(
+                                    'Board ${j.boardingTime} → Drop ${j.destinationTime}\n'
+                                    '${j.currentOccupancy}/${j.busCapacity} passengers (${j.occupancyPct.toStringAsFixed(0)}%)',
+                                    style: const TextStyle(fontSize: 12),
+                                  ),
+                                  isThreeLine: true,
+                                  trailing: const Icon(Icons.chevron_right),
+                                  onTap: () async {
+                                    final bus = provider.buses.where((b) => b.busId == j.busId).firstOrNull;
+                                    if (bus != null) {
+                                      await provider.selectBus(bus);
+                                      if (context.mounted) {
+                                        Navigator.push(
+                                          context,
+                                          MaterialPageRoute(builder: (_) => TrackingScreen(bus: bus)),
+                                        );
+                                      }
+                                    }
+                                  },
+                                ),
+                              );
+                            }),
+                          ],
+                        );
+                      },
                     ),
-                  ),
+                  ],
                 ],
               ),
             ),

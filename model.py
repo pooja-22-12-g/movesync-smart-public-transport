@@ -32,7 +32,7 @@ from sklearn.metrics import mean_absolute_error, root_mean_squared_error, r2_sco
 
 MODEL_DIR = "models"
 MODEL_FILE = os.path.join(MODEL_DIR, "random_forest_occupancy.joblib")
-CSV_PATH = os.path.join("data", "bus_occupancy.csv")
+CSV_PATH = os.path.join("data", "movesync_kr_market_anekal_via_electronic_city.csv")
 
 # Feature definition
 FEATURE_COLUMNS = [

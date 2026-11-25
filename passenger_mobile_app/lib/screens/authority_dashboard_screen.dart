@@ -19,7 +19,7 @@ class _AuthorityDashboardScreenState extends State<AuthorityDashboardScreen> {
 
   void _showCountingDialog(TransitProvider provider) {
     final busCtrl = TextEditingController(text: 'KA-BUS-001');
-    final routeCtrl = TextEditingController(text: 'R047');
+    final routeCtrl = TextEditingController(text: 'KR_MARKET_ANEKAL_VIA_ECITY');
     final sessionCtrl = TextEditingController(text: 'VID_${DateTime.now().millisecondsSinceEpoch}');
     final boardCtrl = TextEditingController(text: '4');
     final alightCtrl = TextEditingController(text: '6');

@@ -38,6 +38,13 @@ class TransitProvider with ChangeNotifier {
   bool _locationPermissionDenied = false;
   List<NearbyStop> _nearbyStops = [];
   List<NearbyStop> _stopSearchResults = [];
+  List<NearbyStop> _allStops = [];
+  JourneySearchResult? _journeySearchResult;
+  bool _isSearchingJourneys = false;
+  List<SavedTrip> _savedTrips = [];
+  bool _isLoadingSavedTrips = false;
+  BusUpcomingResponse? _busUpcomingResponse;
+  bool _isLoadingUpcoming = false;
   String _sourceStopQuery = '';
   String _destinationStopQuery = '';
 
@@ -72,17 +79,34 @@ class TransitProvider with ChangeNotifier {
   bool get locationPermissionDenied => _locationPermissionDenied;
   List<NearbyStop> get nearbyStops => _nearbyStops;
   List<NearbyStop> get stopSearchResults => _stopSearchResults;
+  List<NearbyStop> get allStops => _allStops;
+  JourneySearchResult? get journeySearchResult => _journeySearchResult;
+  bool get isSearchingJourneys => _isSearchingJourneys;
+  List<SavedTrip> get savedTrips => _savedTrips;
+  bool get isLoadingSavedTrips => _isLoadingSavedTrips;
+  BusUpcomingResponse? get busUpcomingResponse => _busUpcomingResponse;
+  bool get isLoadingUpcoming => _isLoadingUpcoming;
   String get sourceStopQuery => _sourceStopQuery;
   String get destinationStopQuery => _destinationStopQuery;
 
   // Authentication
-  Future<bool> login(String email, String password) async {
+  Future<bool> login(String email, String password, {bool requireAuthority = false}) async {
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
     try {
       final res = await api.login(email, password);
       _currentUser = UserProfile.fromJson(res['user']);
+      if (requireAuthority && !isAuthority) {
+        _currentUser = null;
+        _isAuthenticated = false;
+        api.setToken(null);
+        _isLoading = false;
+        _errorMessage =
+            'Access denied: Authority credentials required. Passenger accounts cannot access the Authority Dashboard.';
+        notifyListeners();
+        return false;
+      }
       _isAuthenticated = true;
       _isLoading = false;
       ws.connect(WebSocketService.defaultWsUrl, api.authToken);
@@ -161,8 +185,10 @@ class TransitProvider with ChangeNotifier {
           } catch (_) {}
         }
       } else {
-        // Load default searchable stops so Explore & Nearby have real surveyed stops ready
+        // Load all 50 stops and user's saved trips for Passenger experience
         _stopSearchResults = await api.searchStops('');
+        _allStops = await api.searchStops('');
+        _savedTrips = await api.fetchSavedTrips();
       }
       _isLoading = false;
       notifyListeners();
@@ -208,6 +234,41 @@ class TransitProvider with ChangeNotifier {
   void setJourneyStops(String source, String destination) {
     _sourceStopQuery = source;
     _destinationStopQuery = destination;
+    notifyListeners();
+  }
+
+  Future<JourneySearchResult?> searchJourneys(
+      String source, String destination) async {
+    _sourceStopQuery = source;
+    _destinationStopQuery = destination;
+    _isSearchingJourneys = true;
+    notifyListeners();
+    try {
+      _journeySearchResult = await api.searchJourneys(source, destination);
+    } catch (_) {
+      _journeySearchResult = null;
+    }
+    _isSearchingJourneys = false;
+    notifyListeners();
+    return _journeySearchResult;
+  }
+
+  Future<Map<String, dynamic>> saveTrip(
+      String sourceStop, String destinationStop) async {
+    final res = await api.saveTrip(sourceStop, destinationStop);
+    if (res['ok'] == true) {
+      await loadSavedTrips();
+    }
+    return res;
+  }
+
+  Future<void> loadSavedTrips() async {
+    _isLoadingSavedTrips = true;
+    notifyListeners();
+    try {
+      _savedTrips = await api.fetchSavedTrips();
+    } catch (_) {}
+    _isLoadingSavedTrips = false;
     notifyListeners();
   }
 
@@ -262,16 +323,20 @@ class TransitProvider with ChangeNotifier {
 
   Future<void> selectBus(BusState bus) async {
     _selectedBus = bus;
+    _busUpcomingResponse = null;
+    _isLoadingUpcoming = true;
     notifyListeners();
     try {
+      _busUpcomingResponse = await api.fetchBusUpcomingStops(bus.busId);
       _selectedBusLocation = await api.fetchBusLocation(bus.busId);
       if (bus.lastStopId != null) {
         _currentForecasts = await api.fetchPredictions(bus.busId, bus.lastStopId!);
       }
-      notifyListeners();
     } catch (e) {
       debugPrint('Error fetching bus details: $e');
     }
+    _isLoadingUpcoming = false;
+    notifyListeners();
   }
 
   // Alternative Less-Crowded Buses Algorithm

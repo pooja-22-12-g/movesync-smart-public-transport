@@ -25,6 +25,9 @@ class TrackingScreen extends StatelessWidget {
 
     final location = provider.selectedBusLocation;
     final forecasts = provider.currentForecasts;
+    final upcomingResp = (provider.busUpcomingResponse?.busId == activeBus.busId)
+        ? provider.busUpcomingResponse
+        : null;
     final alternatives = provider.getAlternativeBuses(activeBus.currentRouteId ?? '', activeBus.busId);
 
     final busLatLng = location != null
@@ -32,8 +35,12 @@ class TrackingScreen extends StatelessWidget {
         : const LatLng(12.9770, 77.5713);
 
     final statusColor = MoveSyncTheme.statusColor(activeBus.occupancyStatus);
-    final crowdLabel = MoveSyncTheme.passengerCrowdLabel(activeBus.currentOccupancy, activeBus.capacity);
-    final isSimulatedLoc = location == null || location.dataProvenance.contains('SIMULATED') || location.dataProvenance.contains('INTERPOLATED');
+    final crowdLabel = upcomingResp?.crowdStatus ??
+        MoveSyncTheme.passengerCrowdLabel(activeBus.currentOccupancy, activeBus.capacity);
+    final isSimulatedLoc = location == null ||
+        location.dataProvenance.contains('SIMULATED') ||
+        location.dataProvenance.contains('INTERPOLATED') ||
+        location.dataProvenance.contains('DATASET');
 
     return Scaffold(
       appBar: AppBar(
@@ -115,8 +122,15 @@ class TrackingScreen extends StatelessWidget {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(activeBus.busId, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.bold, color: MoveSyncTheme.navy)),
-                                    Text('Route ${activeBus.currentRouteId ?? "Depot"} • ${isSimulatedLoc ? "Simulated GPS Waypoint" : "Live GPS"}',
-                                        style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                                    Text(
+                                      'Route ${activeBus.currentRouteId ?? "Depot"} • ${isSimulatedLoc ? "Dataset / Simulated Location" : "Live GPS"}',
+                                      style: const TextStyle(fontSize: 12, color: Colors.black54),
+                                    ),
+                                    if (upcomingResp != null)
+                                      Text(
+                                        'Current Stop: ${upcomingResp.currentStopName} (#${upcomingResp.currentStopSequence})',
+                                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: MoveSyncTheme.teal),
+                                      ),
                                   ],
                                 ),
                                 Container(
@@ -134,8 +148,8 @@ class TrackingScreen extends StatelessWidget {
                               mainAxisAlignment: MainAxisAlignment.spaceAround,
                               children: [
                                 _stat('Occupancy', '${activeBus.currentOccupancy} / ${activeBus.capacity}', statusColor),
-                                _stat('Available', '${activeBus.availableCapacity} seats', MoveSyncTheme.teal),
-                                _stat('ETA', location?.estimatedArrivalMins != null ? '~${location!.estimatedArrivalMins} min' : 'N/A', MoveSyncTheme.navy),
+                                _stat('Occupied', '${activeBus.occupancyPct.toStringAsFixed(0)}%', MoveSyncTheme.teal),
+                                _stat('Available', '${activeBus.availableCapacity} seats', MoveSyncTheme.navy),
                               ],
                             ),
                           ],
@@ -146,10 +160,62 @@ class TrackingScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 16),
 
-                // Upcoming Stop Crowd Predictions (Plain Language)
-                const Text('Upcoming Stops Crowd Outlook', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: MoveSyncTheme.navy)),
+                // Upcoming Stops in Route Sequence
+                const Text('Upcoming Stops & Expected Occupancy', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: MoveSyncTheme.navy)),
                 const SizedBox(height: 8),
-                if (forecasts.isEmpty)
+                if (provider.isLoadingUpcoming)
+                  const Center(child: Padding(padding: EdgeInsets.all(16), child: CircularProgressIndicator()))
+                else if (upcomingResp != null && upcomingResp.upcomingStops.isNotEmpty)
+                  ...upcomingResp.upcomingStops.map((s) {
+                    final sColor = MoveSyncTheme.statusColor(
+                      s.occupancyPct >= 100
+                          ? 'CRITICAL'
+                          : (s.occupancyPct >= 75 ? 'WARNING' : 'NORMAL'),
+                    );
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      shape: s.isNextStop
+                          ? RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              side: const BorderSide(color: MoveSyncTheme.teal, width: 1.5),
+                            )
+                          : null,
+                      child: ListTile(
+                        leading: CircleAvatar(
+                          radius: 16,
+                          backgroundColor: s.isNextStop ? MoveSyncTheme.teal : MoveSyncTheme.navy,
+                          child: Text('#${s.stopSequence}', style: const TextStyle(color: Colors.white, fontSize: 11)),
+                        ),
+                        title: Row(
+                          children: [
+                            Expanded(
+                              child: Text(s.stopName, style: const TextStyle(fontWeight: FontWeight.w600)),
+                            ),
+                            if (s.isNextStop)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: MoveSyncTheme.teal.withValues(alpha: 0.14),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: const Text(
+                                  'NEXT STOP',
+                                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: MoveSyncTheme.teal),
+                                ),
+                              ),
+                          ],
+                        ),
+                        subtitle: Text(
+                          'Expected: ${s.expectedOccupancy} / ${s.busCapacity} (${s.occupancyPct.toStringAsFixed(0)}%) • '
+                          'Board +${s.expectedBoarding} / Alight -${s.expectedAlighting}'
+                          '${s.expectedTime.isNotEmpty ? " • ${s.expectedTime}" : ""}',
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                        trailing: Text(s.crowdStatus, style: TextStyle(fontWeight: FontWeight.bold, color: sColor, fontSize: 12)),
+                      ),
+                    );
+                  })
+                else if (forecasts.isEmpty)
                   const Card(
                     child: Padding(
                       padding: EdgeInsets.all(14),
@@ -176,7 +242,28 @@ class TrackingScreen extends StatelessWidget {
                   }),
 
                 // Less-Crowded Alternatives
-                if (alternatives.isNotEmpty) ...[
+                if (upcomingResp != null && upcomingResp.lessCrowdedAlternatives.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  const Text('Less-Crowded Alternative Buses', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: MoveSyncTheme.navy)),
+                  const SizedBox(height: 8),
+                  ...upcomingResp.lessCrowdedAlternatives.map((alt) {
+                    final altColor = MoveSyncTheme.statusColor(
+                      alt.occupancyPct >= 100
+                          ? 'CRITICAL'
+                          : (alt.occupancyPct >= 75 ? 'WARNING' : 'NORMAL'),
+                    );
+                    return Card(
+                      color: Colors.green.shade50,
+                      margin: const EdgeInsets.only(bottom: 8),
+                      child: ListTile(
+                        leading: Icon(Icons.directions_bus, color: altColor),
+                        title: Text(alt.busId, style: const TextStyle(fontWeight: FontWeight.bold)),
+                        subtitle: Text('At ${alt.currentStop} • ${alt.crowdStatus} (${alt.occupancyPct.toStringAsFixed(0)}%)'),
+                        trailing: Text('${alt.currentOccupancy}/${alt.busCapacity}', style: TextStyle(fontWeight: FontWeight.bold, color: altColor)),
+                      ),
+                    );
+                  }),
+                ] else if (alternatives.isNotEmpty) ...[
                   const SizedBox(height: 16),
                   const Text('Less-Crowded Alternative Buses', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: MoveSyncTheme.navy)),
                   const SizedBox(height: 8),

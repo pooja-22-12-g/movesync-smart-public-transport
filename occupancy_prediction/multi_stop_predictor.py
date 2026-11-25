@@ -54,7 +54,7 @@ from occupancy_prediction.prediction_pipeline import (
     VALID_ROUTES,
 )
 
-CSV_PATH = os.path.join("data", "bus_occupancy.csv")
+CSV_PATH = os.path.join("data", "movesync_kr_market_anekal_via_electronic_city.csv")
 
 
 @dataclass

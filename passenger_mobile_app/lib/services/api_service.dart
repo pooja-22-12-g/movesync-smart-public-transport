@@ -279,5 +279,62 @@ class ApiService {
     }
     return null;
   }
+
+  Future<JourneySearchResult?> searchJourneys(
+      String source, String destination) async {
+    final uri = Uri.parse('$baseUrl/api/journeys/search').replace(
+      queryParameters: {
+        'source': source.trim(),
+        'destination': destination.trim(),
+      },
+    );
+    final response = await http.get(uri, headers: _headers);
+    if (response.statusCode == 200) {
+      return JourneySearchResult.fromJson(jsonDecode(response.body));
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>> saveTrip(
+      String sourceStop, String destinationStop) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/api/trips/save'),
+      headers: _headers,
+      body: jsonEncode({
+        'source_stop': sourceStop.trim(),
+        'destination_stop': destinationStop.trim(),
+      }),
+    );
+    final body = jsonDecode(response.body);
+    return {
+      'ok': response.statusCode == 200,
+      'message': body['detail'] ?? 'Trip saved',
+      ...body,
+    };
+  }
+
+  Future<List<SavedTrip>> fetchSavedTrips() async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/api/trips/saved'),
+      headers: _headers,
+    );
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      final list = data['saved_trips'] as List? ?? [];
+      return list.map((t) => SavedTrip.fromJson(t)).toList();
+    }
+    return [];
+  }
+
+  Future<BusUpcomingResponse?> fetchBusUpcomingStops(String busId) async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/api/buses/$busId/upcoming-stops'),
+      headers: _headers,
+    );
+    if (response.statusCode == 200) {
+      return BusUpcomingResponse.fromJson(jsonDecode(response.body));
+    }
+    return null;
+  }
 }
 
