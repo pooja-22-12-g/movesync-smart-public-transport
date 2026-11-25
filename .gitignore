@@ -1,0 +1,27 @@
+# Secrets & Credentials (NEVER commit to Git)
+serviceAccountKey.json
+**/serviceAccountKey.json
+*firebase-adminsdk*.json
+**/*firebase-adminsdk*.json
+.env
+.env.*
+*.pem
+*.key
+secrets/
+credentials/
+
+# Python
+__pycache__/
+*.py[cod]
+*.log
+.pytest_cache/
+venv/
+.venv/
+env/
+
+# Flutter / Android build artifacts
+passenger_mobile_app/build/
+passenger_mobile_app/android/build/
+passenger_mobile_app/.dart_tool/
+passenger_mobile_app/.flutter-plugins-dependencies
+passenger_mobile_app/android/local.properties

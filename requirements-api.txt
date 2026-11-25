@@ -1,0 +1,13 @@
+# Lightweight API-only dependencies for Render Free Tier (512 MB RAM)
+# Heavy CV/Dashboard libraries (torch, ultralytics, opencv-python, streamlit, plotly)
+# remain in requirements.txt for local desktop/video processing only.
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+websockets>=13.0
+pydantic>=2.8.0
+firebase-admin>=7.7.0
+PyJWT>=2.10.0
+pandas>=2.2.0
+numpy>=2.0.0
+scikit-learn>=1.5.0
+joblib>=1.4.0

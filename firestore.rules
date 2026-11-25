@@ -1,0 +1,135 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // =========================================================================
+    // HELPER FUNCTIONS & ROLE EVALUATION
+    // =========================================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    // Extract role from Custom Claims first, fallback to Firestore user document
+    function getRole() {
+      return request.auth.token.role != null 
+        ? request.auth.token.role 
+        : (exists(/databases/$(database)/documents/users/$(request.auth.uid)) 
+            ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role 
+            : 'anonymous');
+    }
+    
+    function isPassenger() {
+      return isAuthenticated() && getRole() == 'passenger';
+    }
+    
+    function isAuthority() {
+      return isAuthenticated() && (getRole() == 'authority' || getRole() == 'administrator');
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && getRole() == 'administrator';
+    }
+
+    // =========================================================================
+    // 1. USERS & ROLES
+    // =========================================================================
+    // Critical restriction: Users cannot grant themselves roles or modify their role
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      // Allow registration: new user can only register as 'passenger' unless Admin creates
+      allow create: if isAuthenticated() && request.auth.uid == userId 
+                    && (request.resource.data.role == 'passenger' || isAdmin());
+      // Self update allows profile details (name, fcm_token), but role changes are forbidden
+      allow update: if (isOwner(userId) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'is_admin'])) 
+                    || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // =========================================================================
+    // 2. SYSTEM CONFIGURATION & THRESHOLDS
+    // =========================================================================
+    // Crowding thresholds (70% warning, 90% critical) and transit operating boundaries
+    match /system_config/{configId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // =========================================================================
+    // 3. STATIC & PUBLIC TRANSIT TOPOGRAPHY
+    // =========================================================================
+    // Routes and stops are public read for both apps; editable only by Admin
+    match /routes/{routeId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // 20 Fleet vehicles: public read of status and occupancy; Authority can toggle status
+    match /buses/{busId} {
+      allow read: if true;
+      allow update: if isAuthority() 
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'current_route_id', 'is_relief_bus', 'updated_at']);
+      allow create, delete: if isAdmin();
+    }
+
+    // Bus locations: high-frequency coordinates; read-only to clients (Admin SDK writes)
+    match /bus_locations/{busId} {
+      allow read: if true;
+      allow write: if false; 
+    }
+
+    // Timetable schedules: public read; Authority/Admin can modify schedules
+    match /schedules/{scheduleId} {
+      allow read: if true;
+      allow write: if isAuthority();
+    }
+
+    // =========================================================================
+    // 4. ML PREDICTIONS & OPERATIONAL ALERTS
+    // =========================================================================
+    // Multi-stop Random Forest predictions: readable by authenticated riders/authority
+    match /occupancy_predictions/{predId} {
+      allow read: if isAuthenticated();
+      allow write: if false; // Generated exclusively by Python ML Bridge
+    }
+
+    // Crowding alerts: visible to authenticated users; Authority can acknowledge
+    match /crowding_alerts/{alertId} {
+      allow read: if isAuthenticated();
+      allow update: if isAuthority() 
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['is_acknowledged', 'acknowledged_by', 'alert_status', 'resolved_at']);
+      allow create, delete: if false; // Created by backend event triggers / Admin Bridge
+    }
+
+    // =========================================================================
+    // 5. PROTECTED FLEET MANAGEMENT & TELEMETRY (AUTHORITY ONLY)
+    // =========================================================================
+    // Passengers must NOT access dispatch interventions, trip logs, or fuel telemetry
+    match /dispatch_recommendations/{recId} {
+      allow read: if isAuthority();
+      allow update: if isAuthority() 
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['authority_decision', 'decided_by_uid', 'decision_timestamp']);
+      allow create, delete: if false;
+    }
+
+    match /trips/{tripId} {
+      allow read: if isAuthority();
+      allow write: if isAuthority();
+    }
+
+    match /occupancy_records/{recordId} {
+      allow read: if isAuthority();
+      allow write: if false; // Telemetry written exclusively by Python Admin Bridge
+    }
+
+    match /fuel_telemetry/{docId} {
+      allow read: if isAuthority();
+      allow write: if false; // Synthetic telemetry written exclusively by Admin Bridge
+    }
+  }
+}
+

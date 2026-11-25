@@ -1,0 +1,23 @@
+# Smart Public Transport Occupancy and Fleet Monitoring System Dependencies
+# Core ML & CV
+numpy
+pandas
+scikit-learn
+joblib
+torch
+torchvision
+ultralytics
+opencv-python
+
+# Web Dashboard & Visualization
+streamlit
+plotly
+folium
+streamlit-folium
+
+# Module 7: Firebase Cloud Platform & Backend APIs
+firebase-admin>=7.7.0
+fastapi>=0.115.0
+uvicorn>=0.30.0
+websockets>=13.0
+pydantic>=2.8.0
