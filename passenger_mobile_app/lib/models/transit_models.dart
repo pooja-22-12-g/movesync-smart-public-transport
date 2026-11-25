@@ -97,8 +97,12 @@ class BusState {
   final double occupancyPct;
   final String occupancyStatus; // NORMAL, WARNING, CRITICAL
   final String? currentRouteId;
+  final String? routeName;
   final String? lastStopId;
   final String? lastStopName;
+  final String? nextStopId;
+  final String? nextStopName;
+  final String? currentTripId;
   final String status;
   final bool isReliefBus;
   final String dataProvenance;
@@ -111,8 +115,12 @@ class BusState {
     required this.occupancyPct,
     required this.occupancyStatus,
     this.currentRouteId,
+    this.routeName,
     this.lastStopId,
     this.lastStopName,
+    this.nextStopId,
+    this.nextStopName,
+    this.currentTripId,
     required this.status,
     required this.isReliefBus,
     required this.dataProvenance,
@@ -122,18 +130,22 @@ class BusState {
 
   factory BusState.fromJson(Map<String, dynamic> json) {
     return BusState(
-      busId: json['bus_id'] ?? '',
-      plateNumber: json['plate_number'] ?? '',
-      capacity: json['capacity'] ?? 50,
-      currentOccupancy: json['current_occupancy'] ?? 0,
+      busId: (json['bus_id'] ?? '').toString(),
+      plateNumber: (json['plate_number'] ?? '').toString(),
+      capacity: (json['capacity'] is num) ? (json['capacity'] as num).toInt() : 60,
+      currentOccupancy: (json['current_occupancy'] is num) ? (json['current_occupancy'] as num).toInt() : 0,
       occupancyPct: (json['occupancy_pct'] is num) ? (json['occupancy_pct'] as num).toDouble() : 0.0,
-      occupancyStatus: json['occupancy_status'] ?? 'NORMAL',
-      currentRouteId: json['current_route_id'],
-      lastStopId: json['last_stop_id'],
-      lastStopName: json['last_stop_name'],
-      status: json['status'] ?? 'IN_SERVICE',
-      isReliefBus: json['is_relief_bus'] ?? false,
-      dataProvenance: json['data_provenance'] ?? 'CURRENT_CV_READING',
+      occupancyStatus: (json['occupancy_status'] ?? 'NORMAL').toString(),
+      currentRouteId: json['current_route_id']?.toString(),
+      routeName: json['route_name']?.toString(),
+      lastStopId: json['last_stop_id']?.toString(),
+      lastStopName: json['last_stop_name']?.toString(),
+      nextStopId: json['next_stop_id']?.toString(),
+      nextStopName: json['next_stop_name']?.toString(),
+      currentTripId: json['current_trip_id']?.toString(),
+      status: (json['status'] ?? 'IN_SERVICE').toString(),
+      isReliefBus: json['is_relief_bus'] == true,
+      dataProvenance: (json['data_provenance'] ?? 'SYNTHETIC_DATASET_SNAPSHOT').toString(),
     );
   }
 }
@@ -257,8 +269,9 @@ class NearbyStop {
   final String stopId;
   final String stopName;
   final int stopOrder;
-  final double latitude;
-  final double longitude;
+  final double? latitude;
+  final double? longitude;
+  final bool gpsAvailable;
   final double? distanceKm;
   final List<String> routes;
   final List<Map<String, dynamic>> servingBuses;
@@ -269,8 +282,9 @@ class NearbyStop {
     required this.stopId,
     required this.stopName,
     required this.stopOrder,
-    required this.latitude,
-    required this.longitude,
+    this.latitude,
+    this.longitude,
+    required this.gpsAvailable,
     this.distanceKm,
     required this.routes,
     required this.servingBuses,
@@ -279,17 +293,20 @@ class NearbyStop {
   });
 
   factory NearbyStop.fromJson(Map<String, dynamic> json) {
+    final lat = (json['latitude'] is num) ? (json['latitude'] as num).toDouble() : null;
+    final lon = (json['longitude'] is num) ? (json['longitude'] as num).toDouble() : null;
     return NearbyStop(
-      stopId: json['stop_id'] ?? '',
-      stopName: json['stop_name'] ?? '',
-      stopOrder: json['stop_order'] ?? 0,
-      latitude: (json['latitude'] is num) ? (json['latitude'] as num).toDouble() : 12.9716,
-      longitude: (json['longitude'] is num) ? (json['longitude'] as num).toDouble() : 77.5945,
+      stopId: (json['stop_id'] ?? '').toString(),
+      stopName: (json['stop_name'] ?? '').toString(),
+      stopOrder: (json['stop_order'] is num) ? (json['stop_order'] as num).toInt() : 0,
+      latitude: lat,
+      longitude: lon,
+      gpsAvailable: json['gps_available'] ?? (lat != null && lon != null),
       distanceKm: (json['distance_km'] is num) ? (json['distance_km'] as num).toDouble() : null,
       routes: List<String>.from(json['routes'] ?? []),
       servingBuses: List<Map<String, dynamic>>.from(json['serving_buses'] ?? []),
       nextArrivalMins: (json['next_arrival_mins'] is num) ? (json['next_arrival_mins'] as num).toDouble() : null,
-      dataProvenance: json['data_provenance'] ?? 'SURVEYED_STOPS',
+      dataProvenance: (json['data_provenance'] ?? 'DATASET_STOP_SEQUENCE_NO_GPS').toString(),
     );
   }
 }
@@ -463,8 +480,8 @@ class JourneyOption {
 
   factory JourneyOption.fromJson(Map<String, dynamic> json) {
     return JourneyOption(
-      busId: json['bus_id'] ?? '',
-      tripId: json['trip_id'] ?? '',
+      busId: (json['bus_id'] ?? '').toString(),
+      tripId: (json['trip_id'] ?? '').toString(),
       routeId: json['route_id'] ?? '',
       boardingStop: json['boarding_stop'] ?? '',
       boardingStopId: json['boarding_stop_id'] ?? '',
@@ -562,11 +579,14 @@ class UpcomingStop {
   final int expectedBoarding;
   final int expectedAlighting;
   final int expectedOccupancy;
+  final int availableSeats;
   final int busCapacity;
   final double occupancyPct;
   final String crowdStatus;
   final String expectedTime;
   final bool isNextStop;
+  final bool predictionAvailable;
+  final String predictionSource;
 
   UpcomingStop({
     required this.stopId,
@@ -575,28 +595,39 @@ class UpcomingStop {
     required this.expectedBoarding,
     required this.expectedAlighting,
     required this.expectedOccupancy,
+    required this.availableSeats,
     required this.busCapacity,
     required this.occupancyPct,
     required this.crowdStatus,
     required this.expectedTime,
     required this.isNextStop,
+    required this.predictionAvailable,
+    required this.predictionSource,
   });
 
   factory UpcomingStop.fromJson(Map<String, dynamic> json) {
+    final cap = (json['bus_capacity'] is num) ? (json['bus_capacity'] as num).toInt() : 60;
+    final expOcc = (json['expected_occupancy'] is num) ? (json['expected_occupancy'] as num).toInt() : 0;
+    final avail = (json['available_seats'] is num)
+        ? (json['available_seats'] as num).toInt()
+        : (cap - expOcc).clamp(0, cap);
     return UpcomingStop(
-      stopId: json['stop_id'] ?? '',
-      stopName: json['stop_name'] ?? '',
-      stopSequence: json['stop_sequence'] ?? 0,
-      expectedBoarding: json['expected_boarding'] ?? 0,
-      expectedAlighting: json['expected_alighting'] ?? 0,
-      expectedOccupancy: json['expected_occupancy'] ?? 0,
-      busCapacity: json['bus_capacity'] ?? 60,
+      stopId: (json['stop_id'] ?? '').toString(),
+      stopName: (json['stop_name'] ?? '').toString(),
+      stopSequence: (json['stop_sequence'] is num) ? (json['stop_sequence'] as num).toInt() : 0,
+      expectedBoarding: (json['expected_boarding'] is num) ? (json['expected_boarding'] as num).toInt() : 0,
+      expectedAlighting: (json['expected_alighting'] is num) ? (json['expected_alighting'] as num).toInt() : 0,
+      expectedOccupancy: expOcc,
+      availableSeats: avail,
+      busCapacity: cap,
       occupancyPct: (json['occupancy_pct'] is num)
           ? (json['occupancy_pct'] as num).toDouble()
           : 0.0,
-      crowdStatus: json['crowd_status'] ?? 'Low',
-      expectedTime: json['expected_time'] ?? '',
-      isNextStop: json['is_next_stop'] ?? false,
+      crowdStatus: (json['crowd_status'] ?? 'Low').toString(),
+      expectedTime: (json['expected_time'] ?? '').toString(),
+      isNextStop: json['is_next_stop'] == true,
+      predictionAvailable: json['prediction_available'] ?? true,
+      predictionSource: (json['prediction_source'] ?? 'RANDOM_FOREST_ML').toString(),
     );
   }
 }
@@ -635,6 +666,85 @@ class LessCrowdedAlternative {
   }
 }
 
+class StopBusInfo {
+  final String busId;
+  final String tripId;
+  final String routeId;
+  final String routeName;
+  final String currentStopId;
+  final String currentStopName;
+  final int currentStopSequence;
+  final String? nextStopName;
+  final int currentOccupancy;
+  final int busCapacity;
+  final int availableSeats;
+  final double occupancyPct;
+  final String crowdStatus;
+  final bool upcomingToStop;
+
+  StopBusInfo({
+    required this.busId,
+    required this.tripId,
+    required this.routeId,
+    required this.routeName,
+    required this.currentStopId,
+    required this.currentStopName,
+    required this.currentStopSequence,
+    this.nextStopName,
+    required this.currentOccupancy,
+    required this.busCapacity,
+    required this.availableSeats,
+    required this.occupancyPct,
+    required this.crowdStatus,
+    required this.upcomingToStop,
+  });
+
+  factory StopBusInfo.fromJson(Map<String, dynamic> json) {
+    final cap = (json['bus_capacity'] is num) ? (json['bus_capacity'] as num).toInt() : 60;
+    final occ = (json['current_occupancy'] is num) ? (json['current_occupancy'] as num).toInt() : 0;
+    return StopBusInfo(
+      busId: (json['bus_id'] ?? '').toString(),
+      tripId: (json['trip_id'] ?? '').toString(),
+      routeId: (json['route_id'] ?? '').toString(),
+      routeName: (json['route_name'] ?? 'KR Market → Anekal').toString(),
+      currentStopId: (json['current_stop_id'] ?? '').toString(),
+      currentStopName: (json['current_stop_name'] ?? '').toString(),
+      currentStopSequence: (json['current_stop_sequence'] is num) ? (json['current_stop_sequence'] as num).toInt() : 0,
+      nextStopName: json['next_stop_name']?.toString(),
+      currentOccupancy: occ,
+      busCapacity: cap,
+      availableSeats: (json['available_seats'] is num) ? (json['available_seats'] as num).toInt() : (cap - occ).clamp(0, cap),
+      occupancyPct: (json['occupancy_pct'] is num) ? (json['occupancy_pct'] as num).toDouble() : 0.0,
+      crowdStatus: (json['crowd_status'] ?? 'Low').toString(),
+      upcomingToStop: json['upcoming_to_stop'] == true,
+    );
+  }
+}
+
+class StopDetailsResponse {
+  final bool found;
+  final NearbyStop? stop;
+  final int count;
+  final List<StopBusInfo> buses;
+
+  StopDetailsResponse({
+    required this.found,
+    this.stop,
+    required this.count,
+    required this.buses,
+  });
+
+  factory StopDetailsResponse.fromJson(Map<String, dynamic> json) {
+    final rawBuses = json['buses'] as List? ?? [];
+    return StopDetailsResponse(
+      found: json['found'] == true,
+      stop: json['stop'] != null ? NearbyStop.fromJson(json['stop']) : null,
+      count: (json['count'] is num) ? (json['count'] as num).toInt() : rawBuses.length,
+      buses: rawBuses.map((b) => StopBusInfo.fromJson(b)).toList(),
+    );
+  }
+}
+
 class BusUpcomingResponse {
   final String busId;
   final String tripId;
@@ -644,8 +754,16 @@ class BusUpcomingResponse {
   final int currentStopSequence;
   final int currentOccupancy;
   final int busCapacity;
+  final int availableSeats;
   final double occupancyPct;
   final String crowdStatus;
+  final String currentOccupancySource;
+  final String expectedOccupancySource;
+  final bool actualOccupancyAvailable;
+  final int? actualOccupancy;
+  final bool predictionsAvailable;
+  final String predictionModel;
+  final String? message;
   final String dataProvenance;
   final List<UpcomingStop> upcomingStops;
   final List<LessCrowdedAlternative> lessCrowdedAlternatives;
@@ -659,8 +777,16 @@ class BusUpcomingResponse {
     required this.currentStopSequence,
     required this.currentOccupancy,
     required this.busCapacity,
+    required this.availableSeats,
     required this.occupancyPct,
     required this.crowdStatus,
+    required this.currentOccupancySource,
+    required this.expectedOccupancySource,
+    required this.actualOccupancyAvailable,
+    this.actualOccupancy,
+    required this.predictionsAvailable,
+    required this.predictionModel,
+    this.message,
     required this.dataProvenance,
     required this.upcomingStops,
     required this.lessCrowdedAlternatives,
@@ -669,20 +795,32 @@ class BusUpcomingResponse {
   factory BusUpcomingResponse.fromJson(Map<String, dynamic> json) {
     final rawUpcoming = json['upcoming_stops'] as List? ?? [];
     final rawAlt = json['less_crowded_alternatives'] as List? ?? [];
+    final cap = (json['bus_capacity'] is num) ? (json['bus_capacity'] as num).toInt() : 60;
+    final curOcc = (json['current_occupancy'] is num) ? (json['current_occupancy'] as num).toInt() : 0;
     return BusUpcomingResponse(
-      busId: json['bus_id'] ?? '',
-      tripId: json['trip_id'] ?? '',
-      routeId: json['route_id'] ?? '',
-      currentStopId: json['current_stop_id'] ?? '',
-      currentStopName: json['current_stop_name'] ?? '',
-      currentStopSequence: json['current_stop_sequence'] ?? 0,
-      currentOccupancy: json['current_occupancy'] ?? 0,
-      busCapacity: json['bus_capacity'] ?? 60,
+      busId: (json['bus_id'] ?? '').toString(),
+      tripId: (json['trip_id'] ?? '').toString(),
+      routeId: (json['route_id'] ?? '').toString(),
+      currentStopId: (json['current_stop_id'] ?? '').toString(),
+      currentStopName: (json['current_stop_name'] ?? '').toString(),
+      currentStopSequence: (json['current_stop_sequence'] is num) ? (json['current_stop_sequence'] as num).toInt() : 0,
+      currentOccupancy: curOcc,
+      busCapacity: cap,
+      availableSeats: (json['available_seats'] is num)
+          ? (json['available_seats'] as num).toInt()
+          : (cap - curOcc).clamp(0, cap),
       occupancyPct: (json['occupancy_pct'] is num)
           ? (json['occupancy_pct'] as num).toDouble()
           : 0.0,
-      crowdStatus: json['crowd_status'] ?? 'Low',
-      dataProvenance: json['data_provenance'] ?? 'DATASET_HISTORICAL_SIMULATION',
+      crowdStatus: (json['crowd_status'] ?? 'Low').toString(),
+      currentOccupancySource: (json['current_occupancy_source'] ?? 'DATASET_SIMULATED').toString(),
+      expectedOccupancySource: (json['expected_occupancy_source'] ?? 'RANDOM_FOREST_ML').toString(),
+      actualOccupancyAvailable: json['actual_occupancy_available'] == true,
+      actualOccupancy: (json['actual_occupancy'] is num) ? (json['actual_occupancy'] as num).toInt() : null,
+      predictionsAvailable: json['predictions_available'] ?? rawUpcoming.isNotEmpty,
+      predictionModel: (json['prediction_model'] ?? 'RandomForestRegressor').toString(),
+      message: json['message']?.toString(),
+      dataProvenance: (json['data_provenance'] ?? 'DATASET_SIMULATED_CURRENT_AND_RF_ML_PREDICTION').toString(),
       upcomingStops: rawUpcoming.map((s) => UpcomingStop.fromJson(s)).toList(),
       lessCrowdedAlternatives: rawAlt
           .map((a) => LessCrowdedAlternative.fromJson(a))

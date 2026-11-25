@@ -90,9 +90,9 @@ dataset_service = DatasetQueryService("data/movesync_kr_market_anekal_via_electr
 @app.on_event("startup")
 async def startup_event():
     logger.info("Checking backend state and initial topography...")
-    already_seeded = any(True for _ in bridge.db.collection("routes").stream())
-    if already_seeded:
-        logger.info("Existing routes found in database; skipping destructive seed to preserve live data.")
+    has_active_route = bridge.db.collection("routes").document("KR_MARKET_ANEKAL_VIA_ECITY").get().exists
+    if has_active_route:
+        logger.info("Active route KR_MARKET_ANEKAL_VIA_ECITY already present in database; preserving live state.")
         return
 
     bridge.seed_system_config()
@@ -290,13 +290,13 @@ def get_profile(session: UserSession = Depends(get_current_user)):
 # ------------------------------------------------------------------------------
 @app.get("/api/routes")
 def list_routes():
-    routes = []
-    for doc in bridge.db.collection("routes").stream():
-        routes.append(doc.to_dict())
-    return {"count": len(routes), "routes": routes}
+    active_route = dataset_service.get_active_route()
+    return {"count": 1, "routes": [active_route]}
 
 @app.get("/api/routes/{route_id}")
 def get_route(route_id: str):
+    if route_id == "KR_MARKET_ANEKAL_VIA_ECITY":
+        return dataset_service.get_active_route()
     doc = bridge.db.collection("routes").document(route_id).get()
     if not doc.exists:
         raise HTTPException(status_code=404, detail=f"Route '{route_id}' not found.")
@@ -304,15 +304,54 @@ def get_route(route_id: str):
 
 @app.get("/api/buses")
 def list_buses(route_id: Optional[str] = Query(None)):
-    buses = []
+    snapshots = dataset_service.get_bus_snapshots()
+    firestore_buses = {}
     for doc in bridge.db.collection("buses").stream():
         b = doc.to_dict()
-        if route_id is None or b.get("current_route_id") == route_id:
-            buses.append(b)
+        if b.get("bus_id"):
+            firestore_buses[b["bus_id"]] = b
+
+    buses = []
+    for bus_id in sorted(snapshots.keys()):
+        snap = snapshots[bus_id]
+        if route_id is not None and snap["route_id"] != route_id:
+            continue
+        occ = int(snap["current_occupancy"])
+        cap = int(snap["bus_capacity"])
+        prov = snap["data_provenance"]
+        fb = firestore_buses.get(bus_id)
+        if fb and ("HARDWARE_SENSOR" in str(fb.get("data_provenance", "")) or "YOLO" in str(fb.get("data_provenance", ""))):
+            occ = int(fb.get("current_occupancy", occ))
+            prov = str(fb.get("data_provenance", prov))
+        pct = round((occ / cap) * 100.0, 1) if cap > 0 else 0.0
+        status_str = "CRITICAL" if pct >= 95.0 else ("WARNING" if pct >= 75.0 else "NORMAL")
+        buses.append({
+            "bus_id": bus_id,
+            "plate_number": fb.get("plate_number", f"KA-01-F-{bus_id[-3:]}") if fb else f"KA-01-F-{bus_id[-3:]}",
+            "capacity": cap,
+            "current_occupancy": occ,
+            "available_seats": max(0, cap - occ),
+            "occupancy_pct": pct,
+            "occupancy_status": status_str,
+            "current_route_id": snap["route_id"],
+            "route_name": snap["route_name"],
+            "last_stop_id": snap["stop_id"],
+            "last_stop_name": snap["stop_name"],
+            "next_stop_id": snap["next_stop_id"],
+            "next_stop_name": snap["next_stop_name"],
+            "current_trip_id": str(snap["trip_id"]),
+            "status": "IN_SERVICE",
+            "is_relief_bus": bus_id in ["KA-BUS-019", "KA-BUS-020"],
+            "data_provenance": prov,
+        })
     return {"count": len(buses), "buses": buses}
 
 @app.get("/api/buses/{bus_id}")
 def get_bus(bus_id: str):
+    all_buses = list_buses()["buses"]
+    for b in all_buses:
+        if b["bus_id"] == bus_id:
+            return b
     doc = bridge.db.collection("buses").document(bus_id).get()
     if not doc.exists:
         raise HTTPException(status_code=404, detail=f"Bus '{bus_id}' not found.")
@@ -339,14 +378,41 @@ def get_bus_location(bus_id: str):
 def get_predictions(bus_id: str, stop_id: str, session: UserSession = Depends(get_current_user)):
     doc_id = f"PRED_{bus_id}_{stop_id}"
     doc = bridge.db.collection("occupancy_predictions").document(doc_id).get()
-    if not doc.exists:
+    if doc.exists:
+        return doc.to_dict()
+
+    upcoming = dataset_service.get_bus_upcoming_stops(bus_id)
+    if not upcoming.get("predictions_available") or not upcoming.get("upcoming_stops"):
         return {
             "bus_id": bus_id,
             "stop_id": stop_id,
             "predictions_available": False,
-            "message": "Real-time forecast pending bus arrival at scheduled stop."
+            "message": upcoming.get("message", "Prediction not available for this bus."),
+            "lookahead_forecasts": [],
         }
-    return doc.to_dict()
+
+    forecasts = []
+    for idx, s in enumerate(upcoming["upcoming_stops"], start=1):
+        forecasts.append({
+            "step_ahead": idx,
+            "target_stop_id": s["stop_id"],
+            "target_stop_name": s["stop_name"],
+            "predicted_occupancy_rounded": s["expected_occupancy"],
+            "predicted_occupancy_pct": s["occupancy_pct"],
+            "predicted_status": s["crowd_status"],
+            "available_seats": s["available_seats"],
+            "bus_capacity": s["bus_capacity"],
+            "prediction_source": s["prediction_source"],
+        })
+
+    return {
+        "bus_id": bus_id,
+        "trip_id": upcoming.get("trip_id"),
+        "stop_id": upcoming.get("current_stop_id", stop_id),
+        "predictions_available": True,
+        "prediction_model": upcoming.get("prediction_model", "RandomForestRegressor"),
+        "lookahead_forecasts": forecasts,
+    }
 
 @app.get("/api/alerts/active")
 def get_active_alerts(route_id: Optional[str] = Query(None), session: UserSession = Depends(get_current_user)):
@@ -599,6 +665,15 @@ def search_stops(q: str = Query("", description="Bus stop name query")):
     return {"count": len(formatted), "stops": formatted}
 
 
+@app.get("/api/stops/{stop_id}/buses")
+def get_buses_for_stop(stop_id: str):
+    """Return all buses on KR Market -> Anekal serving the requested stop with current & next stop info."""
+    res = dataset_service.get_buses_for_stop(stop_id)
+    if not res.get("found"):
+        raise HTTPException(status_code=404, detail=f"Stop '{stop_id}' not found.")
+    return res
+
+
 @app.get("/api/journeys/search")
 def search_journeys(
     source: str = Query(..., description="Starting stop name"),
@@ -653,8 +728,16 @@ def get_bus_upcoming_stops(
     trip_id: Optional[int] = Query(None),
     current_stop_seq: Optional[int] = Query(None),
 ):
-    """Return actual upcoming stop names, expected boarding, alighting, occupancy, and less-crowded alternatives."""
-    return dataset_service.get_bus_upcoming_stops(bus_id, trip_id=trip_id, current_stop_seq=current_stop_seq)
+    """Return actual upcoming stop names, ML-predicted expected occupancy, available seats, and less-crowded alternatives."""
+    result = dataset_service.get_bus_upcoming_stops(bus_id, trip_id=trip_id, current_stop_seq=current_stop_seq)
+    bus_doc = bridge.db.collection("buses").document(bus_id).get()
+    if bus_doc.exists:
+        b = bus_doc.to_dict()
+        prov = str(b.get("data_provenance", ""))
+        if "HARDWARE_SENSOR" in prov or "YOLO" in prov:
+            result["actual_occupancy_available"] = True
+            result["actual_occupancy"] = b.get("current_occupancy")
+    return result
 
 
 @app.get("/api/authority/route-demand")

@@ -6,15 +6,33 @@ import '../models/transit_models.dart';
 import '../providers/transit_provider.dart';
 import '../theme/movesync_theme.dart';
 
-class TrackingScreen extends StatelessWidget {
+class TrackingScreen extends StatefulWidget {
   final BusState? bus;
 
   const TrackingScreen({super.key, this.bus});
 
   @override
+  State<TrackingScreen> createState() => _TrackingScreenState();
+}
+
+class _TrackingScreenState extends State<TrackingScreen> {
+  @override
+  void initState() {
+    super.initState();
+    Future.microtask(() {
+      if (!mounted) return;
+      final provider = Provider.of<TransitProvider>(context, listen: false);
+      final target = widget.bus ?? provider.selectedBus ?? (provider.buses.isNotEmpty ? provider.buses.first : null);
+      if (target != null && provider.busUpcomingResponse?.busId != target.busId) {
+        provider.selectBus(target);
+      }
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final provider = Provider.of<TransitProvider>(context);
-    final activeBus = bus ?? provider.selectedBus ?? (provider.buses.isNotEmpty ? provider.buses.first : null);
+    final activeBus = widget.bus ?? provider.selectedBus ?? (provider.buses.isNotEmpty ? provider.buses.first : null);
 
     if (activeBus == null) {
       return Scaffold(
@@ -45,8 +63,17 @@ class TrackingScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: Text('Live Tracking • ${activeBus.busId}', style: const TextStyle(fontWeight: FontWeight.bold)),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Refresh Occupancy & Predictions',
+            onPressed: () => provider.selectBus(activeBus),
+          ),
+        ],
       ),
-      body: ListView(
+      body: RefreshIndicator(
+        onRefresh: () => provider.selectBus(activeBus),
+        child: ListView(
         children: [
           // Map View
           SizedBox(
@@ -147,10 +174,25 @@ class TrackingScreen extends StatelessWidget {
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceAround,
                               children: [
-                                _stat('Occupancy', '${activeBus.currentOccupancy} / ${activeBus.capacity}', statusColor),
+                                _stat('Current (Sim)', '${activeBus.currentOccupancy} / ${activeBus.capacity}', statusColor),
                                 _stat('Occupied', '${activeBus.occupancyPct.toStringAsFixed(0)}%', MoveSyncTheme.teal),
                                 _stat('Available', '${activeBus.availableCapacity} seats', MoveSyncTheme.navy),
                               ],
+                            ),
+                            const SizedBox(height: 10),
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: Colors.grey.shade100,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                upcomingResp?.actualOccupancyAvailable == true
+                                    ? 'Actual Occupancy (Live Sensor): ${upcomingResp!.actualOccupancy} / ${activeBus.capacity}'
+                                    : 'Actual Occupancy: Not available (measured only by live sensor)${upcomingResp != null && upcomingResp.tripId.isNotEmpty ? " • Trip #${upcomingResp.tripId}" : ""}',
+                                style: const TextStyle(fontSize: 11, color: Colors.black54),
+                              ),
                             ),
                           ],
                         ),
@@ -160,15 +202,20 @@ class TrackingScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 16),
 
-                // Upcoming Stops in Route Sequence
-                const Text('Upcoming Stops & Expected Occupancy', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: MoveSyncTheme.navy)),
+                // Upcoming Stops & ML Occupancy Prediction in Route Sequence
+                const Text('Occupancy Prediction & Upcoming Stops', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: MoveSyncTheme.navy)),
+                const SizedBox(height: 2),
+                const Text(
+                  'Expected occupancy predicted by Random Forest ML model along the 50-stop route.',
+                  style: TextStyle(fontSize: 11, color: Colors.black54),
+                ),
                 const SizedBox(height: 8),
                 if (provider.isLoadingUpcoming)
                   const Center(child: Padding(padding: EdgeInsets.all(16), child: CircularProgressIndicator()))
                 else if (upcomingResp != null && upcomingResp.upcomingStops.isNotEmpty)
                   ...upcomingResp.upcomingStops.map((s) {
                     final sColor = MoveSyncTheme.statusColor(
-                      s.occupancyPct >= 100
+                      s.occupancyPct >= 95
                           ? 'CRITICAL'
                           : (s.occupancyPct >= 75 ? 'WARNING' : 'NORMAL'),
                     );
@@ -206,20 +253,32 @@ class TrackingScreen extends StatelessWidget {
                           ],
                         ),
                         subtitle: Text(
-                          'Expected: ${s.expectedOccupancy} / ${s.busCapacity} (${s.occupancyPct.toStringAsFixed(0)}%) • '
-                          'Board +${s.expectedBoarding} / Alight -${s.expectedAlighting}'
-                          '${s.expectedTime.isNotEmpty ? " • ${s.expectedTime}" : ""}',
+                          s.predictionAvailable
+                              ? 'Expected (ML): ${s.expectedOccupancy} / ${s.busCapacity} (${s.occupancyPct.toStringAsFixed(0)}%) • '
+                                '${s.availableSeats} seats free\n'
+                                'Board +${s.expectedBoarding} / Alight -${s.expectedAlighting}'
+                                '${s.expectedTime.isNotEmpty ? " • ${s.expectedTime}" : ""}'
+                              : 'Prediction not available for this stop\n'
+                                'Board +${s.expectedBoarding} / Alight -${s.expectedAlighting}'
+                                '${s.expectedTime.isNotEmpty ? " • ${s.expectedTime}" : ""}',
                           style: const TextStyle(fontSize: 12),
                         ),
-                        trailing: Text(s.crowdStatus, style: TextStyle(fontWeight: FontWeight.bold, color: sColor, fontSize: 12)),
+                        isThreeLine: true,
+                        trailing: Text(
+                          s.predictionAvailable ? s.crowdStatus : 'N/A',
+                          style: TextStyle(fontWeight: FontWeight.bold, color: sColor, fontSize: 12),
+                        ),
                       ),
                     );
                   })
                 else if (forecasts.isEmpty)
-                  const Card(
+                  Card(
                     child: Padding(
-                      padding: EdgeInsets.all(14),
-                      child: Text('Upcoming stop forecasts will appear once the bus reaches its next scheduled stop.', style: TextStyle(color: Colors.black54)),
+                      padding: const EdgeInsets.all(14),
+                      child: Text(
+                        upcomingResp?.message ?? 'Prediction not available for the selected bus and trip.',
+                        style: const TextStyle(color: Colors.black54),
+                      ),
                     ),
                   )
                 else
@@ -285,6 +344,7 @@ class TrackingScreen extends StatelessWidget {
             ),
           ),
         ],
+      ),
       ),
     );
   }

@@ -43,8 +43,11 @@ class TransitProvider with ChangeNotifier {
   bool _isSearchingJourneys = false;
   List<SavedTrip> _savedTrips = [];
   bool _isLoadingSavedTrips = false;
+  String? _savedTripsError;
   BusUpcomingResponse? _busUpcomingResponse;
   bool _isLoadingUpcoming = false;
+  StopDetailsResponse? _selectedStopDetails;
+  bool _isLoadingStopDetails = false;
   String _sourceStopQuery = '';
   String _destinationStopQuery = '';
 
@@ -84,8 +87,11 @@ class TransitProvider with ChangeNotifier {
   bool get isSearchingJourneys => _isSearchingJourneys;
   List<SavedTrip> get savedTrips => _savedTrips;
   bool get isLoadingSavedTrips => _isLoadingSavedTrips;
+  String? get savedTripsError => _savedTripsError;
   BusUpcomingResponse? get busUpcomingResponse => _busUpcomingResponse;
   bool get isLoadingUpcoming => _isLoadingUpcoming;
+  StopDetailsResponse? get selectedStopDetails => _selectedStopDetails;
+  bool get isLoadingStopDetails => _isLoadingStopDetails;
   String get sourceStopQuery => _sourceStopQuery;
   String get destinationStopQuery => _destinationStopQuery;
 
@@ -264,11 +270,25 @@ class TransitProvider with ChangeNotifier {
 
   Future<void> loadSavedTrips() async {
     _isLoadingSavedTrips = true;
+    _savedTripsError = null;
     notifyListeners();
     try {
       _savedTrips = await api.fetchSavedTrips();
-    } catch (_) {}
+    } catch (e) {
+      _savedTripsError = e.toString().replaceAll('Exception: ', '');
+    }
     _isLoadingSavedTrips = false;
+    notifyListeners();
+  }
+
+  Future<void> loadStopDetails(String stopId) async {
+    _isLoadingStopDetails = true;
+    _selectedStopDetails = null;
+    notifyListeners();
+    try {
+      _selectedStopDetails = await api.fetchBusesForStop(stopId);
+    } catch (_) {}
+    _isLoadingStopDetails = false;
     notifyListeners();
   }
 
@@ -324,14 +344,20 @@ class TransitProvider with ChangeNotifier {
   Future<void> selectBus(BusState bus) async {
     _selectedBus = bus;
     _busUpcomingResponse = null;
+    _currentForecasts = [];
     _isLoadingUpcoming = true;
     notifyListeners();
     try {
+      final freshBus = await api.fetchBus(bus.busId);
+      if (freshBus != null) {
+        _selectedBus = freshBus;
+      }
       _busUpcomingResponse = await api.fetchBusUpcomingStops(bus.busId);
       _selectedBusLocation = await api.fetchBusLocation(bus.busId);
-      if (bus.lastStopId != null) {
-        _currentForecasts = await api.fetchPredictions(bus.busId, bus.lastStopId!);
-      }
+      final stopForPred = _busUpcomingResponse?.currentStopId.isNotEmpty == true
+          ? _busUpcomingResponse!.currentStopId
+          : (bus.lastStopId ?? 'S01');
+      _currentForecasts = await api.fetchPredictions(bus.busId, stopForPred);
     } catch (e) {
       debugPrint('Error fetching bus details: $e');
     }

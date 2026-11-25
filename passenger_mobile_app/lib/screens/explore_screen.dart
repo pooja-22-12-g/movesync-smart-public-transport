@@ -4,8 +4,8 @@ import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 import '../providers/transit_provider.dart';
 import '../theme/movesync_theme.dart';
-import 'route_details_screen.dart';
-import 'tracking_screen.dart';
+import 'journey_details_screen.dart';
+import 'stop_details_screen.dart';
 
 class ExploreScreen extends StatefulWidget {
   const ExploreScreen({super.key});
@@ -49,9 +49,11 @@ class _ExploreScreenState extends State<ExploreScreen> {
             child: Icon(Icons.my_location, color: Colors.white, size: 18),
           ),
         ),
-      ...stopsToDisplay.take(15).map(
+      ...stopsToDisplay
+          .where((s) => s.gpsAvailable && s.latitude != null && s.longitude != null)
+          .map(
             (s) => Marker(
-              point: LatLng(s.latitude, s.longitude),
+              point: LatLng(s.latitude!, s.longitude!),
               width: 32,
               height: 32,
               child: const CircleAvatar(
@@ -288,9 +290,11 @@ class _ExploreScreenState extends State<ExploreScreen> {
                               ),
                             ],
                             const SizedBox(height: 8),
-                            ...res.journeys.take(10).map((j) {
+                            ...res.journeys.map((j) {
+                              final avail = (j.busCapacity - j.currentOccupancy).clamp(0, j.busCapacity);
+                              final totalStops = j.destinationSequence - j.boardingSequence + 1;
                               final color = MoveSyncTheme.statusColor(
-                                j.occupancyPct >= 100
+                                j.occupancyPct >= 95
                                     ? 'CRITICAL'
                                     : (j.occupancyPct >= 75 ? 'WARNING' : 'NORMAL'),
                               );
@@ -302,26 +306,20 @@ class _ExploreScreenState extends State<ExploreScreen> {
                                     backgroundColor: color.withValues(alpha: 0.14),
                                     child: Icon(Icons.directions_bus, color: color, size: 20),
                                   ),
-                                  title: Text('${j.busId} • ${j.crowdStatus}',
-                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                                  title: Text('${j.busId} • KR Market → Anekal • ${j.crowdStatus}',
+                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                                   subtitle: Text(
-                                    'Board ${j.boardingTime} → Drop ${j.destinationTime}\n'
-                                    '${j.currentOccupancy}/${j.busCapacity} passengers (${j.occupancyPct.toStringAsFixed(0)}%)',
+                                    '${j.boardingStop} (${j.boardingTime}) → ${j.destinationStop} (${j.destinationTime})\n'
+                                    '$totalStops stops • ${j.currentOccupancy}/${j.busCapacity} occupied • $avail seats free',
                                     style: const TextStyle(fontSize: 12),
                                   ),
                                   isThreeLine: true,
                                   trailing: const Icon(Icons.chevron_right),
-                                  onTap: () async {
-                                    final bus = provider.buses.where((b) => b.busId == j.busId).firstOrNull;
-                                    if (bus != null) {
-                                      await provider.selectBus(bus);
-                                      if (context.mounted) {
-                                        Navigator.push(
-                                          context,
-                                          MaterialPageRoute(builder: (_) => TrackingScreen(bus: bus)),
-                                        );
-                                      }
-                                    }
+                                  onTap: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(builder: (_) => JourneyDetailsScreen(journey: j)),
+                                    );
                                   },
                                 ),
                               );
@@ -340,7 +338,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
           Text(
             provider.nearbyStops.isNotEmpty
                 ? 'Nearby Bus Stops (${provider.nearbyStops.length})'
-                : 'Available Surveyed Stops (${stopsToDisplay.length})',
+                : 'Route Stops (${stopsToDisplay.length})',
             style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: MoveSyncTheme.navy),
           ),
           const SizedBox(height: 8),
@@ -352,26 +350,25 @@ class _ExploreScreenState extends State<ExploreScreen> {
               ),
             )
           else
-            ...stopsToDisplay.take(15).map((stop) {
-              final etaText = stop.nextArrivalMins != null ? ' • Next bus ~${stop.nextArrivalMins} min (Simulated)' : '';
-              final distText = stop.distanceKm != null ? '${stop.distanceKm} km away' : 'Surveyed Stop';
+            ...stopsToDisplay.map((stop) {
+              final distText = stop.distanceKm != null
+                  ? '${stop.distanceKm} km away (GPS)'
+                  : (stop.gpsAvailable ? 'Surveyed GPS Stop' : 'Dataset Stop #${stop.stopOrder} (GPS unavailable)');
               return Card(
                 margin: const EdgeInsets.only(bottom: 8),
                 child: ListTile(
-                  leading: const CircleAvatar(
+                  leading: CircleAvatar(
                     backgroundColor: MoveSyncTheme.lightBlue,
-                    child: Icon(Icons.directions_bus_outlined, color: MoveSyncTheme.navy),
+                    child: Text('${stop.stopOrder}', style: const TextStyle(color: MoveSyncTheme.navy, fontWeight: FontWeight.bold, fontSize: 12)),
                   ),
                   title: Text(stop.stopName, style: const TextStyle(fontWeight: FontWeight.bold)),
-                  subtitle: Text('$distText • Routes: ${stop.routes.join(", ")}$etaText'),
+                  subtitle: Text('$distText • KR Market → Anekal'),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () {
-                    final routeId = stop.routes.isNotEmpty ? stop.routes.first : null;
-                    final route = provider.routes.where((r) => r.routeId == routeId).firstOrNull;
-                    if (route != null) {
-                      provider.selectRoute(route);
-                      Navigator.push(context, MaterialPageRoute(builder: (_) => RouteDetailsScreen(route: route)));
-                    }
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => StopDetailsScreen(stop: stop)),
+                    );
                   },
                 ),
               );

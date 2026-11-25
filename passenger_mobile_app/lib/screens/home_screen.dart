@@ -33,21 +33,18 @@ class _HomeScreenState extends State<HomeScreen> {
     }.where((name) => name.trim().isNotEmpty).toList();
 
     final query = _selectedStopQuery.trim().toLowerCase();
-    final matchingRouteIds = query.isEmpty
-        ? <String>{}
-        : provider.routes
-            .where((r) => r.stops.any((s) => s.stopName.toLowerCase().contains(query)))
-            .map((r) => r.routeId)
-            .toSet();
+    final matchingStop = query.isEmpty
+        ? false
+        : stopNames.any((s) => s.toLowerCase().contains(query));
 
     final filteredBuses = query.isEmpty
         ? provider.buses
         : provider.buses.where((b) {
-            final routeId = b.currentRouteId ?? '';
-            if (matchingRouteIds.isNotEmpty) {
-              return matchingRouteIds.contains(routeId);
-            }
-            return b.busId.toLowerCase().contains(query);
+            final idMatch = b.busId.toLowerCase().contains(query);
+            final stopMatch = matchingStop && (b.currentRouteId == 'KR_MARKET_ANEKAL_VIA_ECITY' || provider.routes.any((r) => r.routeId == b.currentRouteId && r.stops.any((s) => s.stopName.toLowerCase().contains(query))));
+            final currentStopMatch = (b.lastStopName ?? '').toLowerCase().contains(query);
+            final nextStopMatch = (b.nextStopName ?? '').toLowerCase().contains(query);
+            return idMatch || stopMatch || currentStopMatch || nextStopMatch;
           }).toList();
 
     return Scaffold(
@@ -110,7 +107,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           setState(() => _selectedStopQuery = val);
                         },
                         decoration: InputDecoration(
-                          hintText: 'Search bus stop (e.g. KR Market, Madiwala, Electronic City)...',
+                          hintText: 'Search stop (KR Market, Madiwala) or bus ID (BUS-001)...',
                           prefixIcon: const Icon(Icons.search),
                           suffixIcon: _selectedStopQuery.isNotEmpty
                               ? IconButton(
@@ -242,16 +239,21 @@ class _HomeScreenState extends State<HomeScreen> {
                             backgroundColor: statusColor.withValues(alpha: 0.14),
                             child: Icon(Icons.directions_bus, color: statusColor),
                           ),
-                          title: Text('${bus.busId} • Route ${bus.currentRouteId ?? "Depot"}',
-                              style: const TextStyle(fontWeight: FontWeight.bold)),
+                          title: Text('${bus.busId} • ${bus.routeName ?? "KR Market → Anekal"}',
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                           subtitle: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
+                              Text(
+                                'Current: ${bus.lastStopName ?? "In Transit"} • Next: ${bus.nextStopName ?? "Anekal"}',
+                                style: const TextStyle(fontSize: 12),
+                              ),
                               Text('${bus.currentOccupancy} / ${bus.capacity} passengers • ${bus.availableCapacity} seats available'),
-                              const SizedBox(height: 4),
-                              Text(crowdLabel, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: statusColor)),
+                              const SizedBox(height: 2),
+                              Text('$crowdLabel • ${bus.status}', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: statusColor)),
                             ],
                           ),
+                          isThreeLine: true,
                           trailing: const Icon(Icons.chevron_right),
                           onTap: () async {
                             await provider.selectBus(bus);

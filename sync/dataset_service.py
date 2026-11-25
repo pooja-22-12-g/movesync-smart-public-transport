@@ -9,6 +9,8 @@ import os
 from typing import List, Dict, Any, Optional
 import pandas as pd
 
+from model import predict_future_occupancy
+
 
 def crowd_label(occupancy: int, capacity: int) -> str:
     pct = (occupancy / capacity) * 100.0 if capacity > 0 else 0.0
@@ -78,21 +80,85 @@ class DatasetQueryService:
             row = match.iloc[0] if not match.empty else trip_rows.iloc[0]
             cap = int(row["bus_capacity"])
             occ = int(row["current_occupancy"])
+            cur_seq = int(row["stop_sequence"]) if "stop_sequence" in row else 1
+            next_rows = trip_rows[trip_rows["stop_sequence"] > cur_seq]
+            next_row = next_rows.iloc[0] if not next_rows.empty else None
             self._bus_snapshots[str(bus_id)] = {
                 "bus_id": str(bus_id),
                 "trip_id": int(row["trip_id"]),
                 "route_id": str(row["route_id"]),
+                "route_name": "KR Market → Anekal",
                 "stop_id": str(row["stop_id"]),
                 "stop_name": str(row["stop_name"]) if "stop_name" in row else str(row["stop_id"]),
-                "stop_sequence": int(row["stop_sequence"]) if "stop_sequence" in row else 1,
+                "stop_sequence": cur_seq,
+                "next_stop_id": str(next_row["stop_id"]) if next_row is not None else None,
+                "next_stop_name": str(next_row["stop_name"]) if next_row is not None else None,
+                "next_stop_sequence": int(next_row["stop_sequence"]) if next_row is not None else None,
                 "current_occupancy": occ,
                 "bus_capacity": cap,
+                "available_seats": max(0, cap - occ),
                 "occupancy_pct": round((occ / cap) * 100.0, 1) if cap > 0 else 0.0,
                 "boarding": int(row["boarding"]),
                 "alighting": int(row["alighting"]),
                 "timestamp": str(row["timestamp"]),
                 "data_provenance": "SYNTHETIC_DATASET_SNAPSHOT",
             }
+
+    def get_active_route(self) -> Dict[str, Any]:
+        return {
+            "route_id": "KR_MARKET_ANEKAL_VIA_ECITY",
+            "route_name": "KR Market → Anekal (via Electronic City)",
+            "demand_profile": "HIGH_CORRIDOR_DEMAND",
+            "base_cycle_time_mins": 110,
+            "total_stops": len(self._stops),
+            "stops": [
+                {
+                    "stop_id": s["stop_id"],
+                    "stop_order": s["stop_sequence"],
+                    "stop_name": s["stop_name"],
+                    "latitude": s["latitude"],
+                    "longitude": s["longitude"],
+                    "gps_available": s["gps_available"],
+                }
+                for s in self._stops
+            ],
+            "data_provenance": "ACTIVE_50_STOP_DATASET",
+        }
+
+    def get_buses_for_stop(self, stop_query: str) -> Dict[str, Any]:
+        stop = self._find_stop(stop_query)
+        if not stop:
+            return {"found": False, "stop": None, "count": 0, "buses": []}
+        buses = []
+        target_seq = int(stop["stop_sequence"])
+        for bus_id in sorted(self._bus_snapshots.keys()):
+            snap = self._bus_snapshots[bus_id]
+            cap = int(snap["bus_capacity"])
+            occ = int(snap["current_occupancy"])
+            buses.append({
+                "bus_id": bus_id,
+                "trip_id": snap["trip_id"],
+                "route_id": snap["route_id"],
+                "route_name": snap["route_name"],
+                "current_stop_id": snap["stop_id"],
+                "current_stop_name": snap["stop_name"],
+                "current_stop_sequence": snap["stop_sequence"],
+                "next_stop_id": snap["next_stop_id"],
+                "next_stop_name": snap["next_stop_name"],
+                "current_occupancy": occ,
+                "bus_capacity": cap,
+                "available_seats": max(0, cap - occ),
+                "occupancy_pct": snap["occupancy_pct"],
+                "crowd_status": crowd_label(occ, cap),
+                "upcoming_to_stop": int(snap["stop_sequence"]) <= target_seq,
+                "data_provenance": "SYNTHETIC_DATASET_SNAPSHOT",
+            })
+        return {
+            "found": True,
+            "stop": stop,
+            "count": len(buses),
+            "buses": buses,
+        }
 
     def get_all_stops(self) -> List[Dict[str, Any]]:
         return list(self._stops)
@@ -160,6 +226,7 @@ class DatasetQueryService:
                 "bus_id": str(r["bus_id"]),
                 "trip_id": int(r["trip_id"]),
                 "route_id": str(r["route_id"]),
+                "route_name": "KR Market → Anekal",
                 "boarding_stop": src["stop_name"],
                 "boarding_stop_id": src["stop_id"],
                 "boarding_sequence": src_seq,
@@ -170,9 +237,11 @@ class DatasetQueryService:
                 "destination_time": str(r["timestamp_dst"]),
                 "current_occupancy": occ,
                 "bus_capacity": cap,
+                "available_seats": max(0, cap - occ),
                 "occupancy_pct": pct,
                 "crowd_status": crowd_label(occ, cap),
                 "intermediate_stops": intermediate,
+                "total_stops": dst_seq - src_seq + 1,
                 "data_provenance": "SYNTHETIC_DATASET_TIMETABLE",
             })
 
@@ -193,41 +262,96 @@ class DatasetQueryService:
         bus_id: str,
         trip_id: Optional[int] = None,
         current_stop_seq: Optional[int] = None,
-        limit: int = 12,
+        limit: Optional[int] = None,
     ) -> Dict[str, Any]:
         if self._df is None or self._df.empty:
-            return {"bus_id": bus_id, "upcoming_stops": [], "less_crowded_alternatives": []}
+            return {
+                "bus_id": bus_id,
+                "predictions_available": False,
+                "message": "Prediction not available: dataset not loaded.",
+                "upcoming_stops": [],
+                "less_crowded_alternatives": [],
+            }
 
         snap = self._bus_snapshots.get(bus_id)
         if not snap:
-            return {"bus_id": bus_id, "upcoming_stops": [], "less_crowded_alternatives": []}
+            return {
+                "bus_id": bus_id,
+                "predictions_available": False,
+                "message": f"Prediction not available: no active trip found for {bus_id}.",
+                "upcoming_stops": [],
+                "less_crowded_alternatives": [],
+            }
 
-        t_id = trip_id if trip_id is not None else snap["trip_id"]
-        c_seq = current_stop_seq if current_stop_seq is not None else snap["stop_sequence"]
+        t_id = int(trip_id if trip_id is not None else snap["trip_id"])
+        c_seq = int(current_stop_seq if current_stop_seq is not None else snap["stop_sequence"])
 
-        trip_df = self._df[(self._df["bus_id"] == bus_id) & (self._df["trip_id"] == t_id)].sort_values("stop_sequence")
+        trip_df = self._df[
+            (self._df["bus_id"] == bus_id) & (self._df["trip_id"] == t_id)
+        ].sort_values("stop_sequence")
+        if trip_df.empty:
+            return {
+                "bus_id": bus_id,
+                "trip_id": t_id,
+                "predictions_available": False,
+                "message": f"Prediction not available for {bus_id} trip {t_id}.",
+                "upcoming_stops": [],
+                "less_crowded_alternatives": [],
+            }
+
         cur_row = trip_df[trip_df["stop_sequence"] == c_seq]
         cur_occ = int(cur_row.iloc[0]["current_occupancy"]) if not cur_row.empty else snap["current_occupancy"]
         cur_cap = int(cur_row.iloc[0]["bus_capacity"]) if not cur_row.empty else snap["bus_capacity"]
         cur_name = str(cur_row.iloc[0]["stop_name"]) if not cur_row.empty else snap["stop_name"]
+        cur_stop_id = str(cur_row.iloc[0]["stop_id"]) if not cur_row.empty else snap["stop_id"]
 
-        upcoming_df = trip_df[trip_df["stop_sequence"] > c_seq].head(limit)
+        upcoming_df = trip_df[trip_df["stop_sequence"] > c_seq]
+        if limit is not None and limit > 0:
+            upcoming_df = upcoming_df.head(limit)
+
+        # Predict future occupancy for each upcoming stop using the Random Forest model
+        # Each row i in trip_df predicts future_occupancy at row i+1, so we feed the
+        # preceding stop rows (stop_sequence >= c_seq up to the second-to-last upcoming stop).
+        preds_by_seq: Dict[int, int] = {}
+        prediction_available = False
+        if not upcoming_df.empty:
+            try:
+                prev_rows = trip_df[trip_df["stop_sequence"] >= c_seq].iloc[: len(upcoming_df)]
+                if len(prev_rows) == len(upcoming_df):
+                    raw_preds = predict_future_occupancy(prev_rows)
+                    for (_, u_row), pred_val in zip(upcoming_df.iterrows(), raw_preds):
+                        u_seq = int(u_row["stop_sequence"])
+                        u_cap = int(u_row["bus_capacity"])
+                        clamped = max(0, min(u_cap, int(round(float(pred_val)))))
+                        preds_by_seq[u_seq] = clamped
+                    prediction_available = True
+            except Exception:
+                prediction_available = False
+
         upcoming = []
         for idx, (_, row) in enumerate(upcoming_df.iterrows()):
-            occ = int(row["current_occupancy"])
+            u_seq = int(row["stop_sequence"])
             cap = int(row["bus_capacity"])
+            pred_occ = preds_by_seq.get(u_seq)
+            has_pred = pred_occ is not None
+            occ_for_metrics = pred_occ if has_pred else 0
+            avail_seats = max(0, cap - occ_for_metrics) if has_pred else 0
+            pct = round((occ_for_metrics / cap) * 100.0, 1) if (has_pred and cap > 0) else 0.0
             upcoming.append({
                 "stop_id": str(row["stop_id"]),
                 "stop_name": str(row["stop_name"]),
-                "stop_sequence": int(row["stop_sequence"]),
+                "stop_sequence": u_seq,
                 "expected_boarding": int(row["boarding"]),
                 "expected_alighting": int(row["alighting"]),
-                "expected_occupancy": occ,
+                "expected_occupancy": pred_occ if has_pred else 0,
+                "available_seats": avail_seats,
                 "bus_capacity": cap,
-                "occupancy_pct": round((occ / cap) * 100.0, 1) if cap > 0 else 0.0,
-                "crowd_status": crowd_label(occ, cap),
+                "occupancy_pct": pct,
+                "crowd_status": crowd_label(occ_for_metrics, cap) if has_pred else "Unavailable",
                 "expected_time": str(row["timestamp"]),
                 "is_next_stop": idx == 0,
+                "prediction_available": has_pred,
+                "prediction_source": "RANDOM_FOREST_ML" if has_pred else "UNAVAILABLE",
             })
 
         # Less crowded alternatives serving the same corridor
@@ -249,14 +373,20 @@ class DatasetQueryService:
             "bus_id": bus_id,
             "trip_id": t_id,
             "route_id": snap["route_id"],
-            "current_stop_id": snap["stop_id"],
+            "current_stop_id": cur_stop_id,
             "current_stop_name": cur_name,
             "current_stop_sequence": c_seq,
             "current_occupancy": cur_occ,
             "bus_capacity": cur_cap,
+            "available_seats": max(0, cur_cap - cur_occ),
             "occupancy_pct": round((cur_occ / cur_cap) * 100.0, 1) if cur_cap > 0 else 0.0,
             "crowd_status": crowd_label(cur_occ, cur_cap),
-            "data_provenance": "SYNTHETIC_DATASET_TRIP_PROJECTION",
+            "current_occupancy_source": "DATASET_SIMULATED",
+            "expected_occupancy_source": "RANDOM_FOREST_ML",
+            "actual_occupancy_available": False,
+            "predictions_available": prediction_available and len(upcoming) > 0,
+            "prediction_model": "RandomForestRegressor",
+            "data_provenance": "DATASET_SIMULATED_CURRENT_AND_RF_ML_PREDICTION",
             "upcoming_stops": upcoming,
             "less_crowded_alternatives": alternatives[:3],
         }

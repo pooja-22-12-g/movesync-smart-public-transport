@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/transit_provider.dart';
 import '../theme/movesync_theme.dart';
-import 'tracking_screen.dart';
+import 'journey_details_screen.dart';
 
 class MyTripsScreen extends StatefulWidget {
   const MyTripsScreen({super.key});
@@ -44,7 +44,18 @@ class _MyTripsScreenState extends State<MyTripsScreen> {
               child: ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
-                  if (savedTrips.isEmpty)
+                  if (provider.savedTripsError != null)
+                    Card(
+                      color: Colors.red.shade50,
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Text(
+                          'Could not load saved trips: ${provider.savedTripsError}',
+                          style: const TextStyle(color: MoveSyncTheme.red),
+                        ),
+                      ),
+                    )
+                  else if (savedTrips.isEmpty)
                     const Card(
                       child: Padding(
                         padding: EdgeInsets.all(24),
@@ -126,19 +137,11 @@ class _MyTripsScreenState extends State<MyTripsScreen> {
                                     ),
                                     isThreeLine: true,
                                     trailing: const Icon(Icons.chevron_right),
-                                    onTap: () async {
-                                      final bus = provider.buses
-                                          .where((b) => b.busId == busMatch.busId)
-                                          .firstOrNull;
-                                      if (bus != null) {
-                                        await provider.selectBus(bus);
-                                        if (context.mounted) {
-                                          Navigator.push(
-                                            context,
-                                            MaterialPageRoute(builder: (_) => TrackingScreen(bus: bus)),
-                                          );
-                                        }
-                                      }
+                                    onTap: () {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(builder: (_) => JourneyDetailsScreen(journey: busMatch)),
+                                      );
                                     },
                                   );
                                 }),

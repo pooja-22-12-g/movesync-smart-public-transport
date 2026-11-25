@@ -305,10 +305,15 @@ class ApiService {
         'destination_stop': destinationStop.trim(),
       }),
     );
-    final body = jsonDecode(response.body);
+    Map<String, dynamic> body = {};
+    try {
+      body = jsonDecode(response.body) as Map<String, dynamic>;
+    } catch (_) {}
+    final ok = response.statusCode == 200 || response.statusCode == 201;
     return {
-      'ok': response.statusCode == 200,
-      'message': body['detail'] ?? 'Trip saved',
+      'ok': ok,
+      'statusCode': response.statusCode,
+      'message': body['detail'] ?? (ok ? 'Trip saved' : 'Failed to save trip (${response.statusCode})'),
       ...body,
     };
   }
@@ -323,7 +328,18 @@ class ApiService {
       final list = data['saved_trips'] as List? ?? [];
       return list.map((t) => SavedTrip.fromJson(t)).toList();
     }
-    return [];
+    throw Exception('Failed to load saved trips (${response.statusCode})');
+  }
+
+  Future<StopDetailsResponse?> fetchBusesForStop(String stopId) async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/api/stops/${Uri.encodeComponent(stopId)}/buses'),
+      headers: _headers,
+    );
+    if (response.statusCode == 200) {
+      return StopDetailsResponse.fromJson(jsonDecode(response.body));
+    }
+    return null;
   }
 
   Future<BusUpcomingResponse?> fetchBusUpcomingStops(String busId) async {
