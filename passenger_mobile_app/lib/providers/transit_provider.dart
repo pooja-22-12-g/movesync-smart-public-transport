@@ -41,11 +41,14 @@ class TransitProvider with ChangeNotifier {
   List<NearbyStop> _allStops = [];
   JourneySearchResult? _journeySearchResult;
   bool _isSearchingJourneys = false;
+  String? _journeySearchError;
   List<SavedTrip> _savedTrips = [];
   bool _isLoadingSavedTrips = false;
   String? _savedTripsError;
   BusUpcomingResponse? _busUpcomingResponse;
   bool _isLoadingUpcoming = false;
+  String? _busDetailsError;
+  JourneyOption? _selectedJourney;
   StopDetailsResponse? _selectedStopDetails;
   bool _isLoadingStopDetails = false;
   String _sourceStopQuery = '';
@@ -85,11 +88,14 @@ class TransitProvider with ChangeNotifier {
   List<NearbyStop> get allStops => _allStops;
   JourneySearchResult? get journeySearchResult => _journeySearchResult;
   bool get isSearchingJourneys => _isSearchingJourneys;
+  String? get journeySearchError => _journeySearchError;
   List<SavedTrip> get savedTrips => _savedTrips;
   bool get isLoadingSavedTrips => _isLoadingSavedTrips;
   String? get savedTripsError => _savedTripsError;
   BusUpcomingResponse? get busUpcomingResponse => _busUpcomingResponse;
   bool get isLoadingUpcoming => _isLoadingUpcoming;
+  String? get busDetailsError => _busDetailsError;
+  JourneyOption? get selectedJourney => _selectedJourney;
   StopDetailsResponse? get selectedStopDetails => _selectedStopDetails;
   bool get isLoadingStopDetails => _isLoadingStopDetails;
   String get sourceStopQuery => _sourceStopQuery;
@@ -248,11 +254,13 @@ class TransitProvider with ChangeNotifier {
     _sourceStopQuery = source;
     _destinationStopQuery = destination;
     _isSearchingJourneys = true;
+    _journeySearchError = null;
     notifyListeners();
     try {
       _journeySearchResult = await api.searchJourneys(source, destination);
-    } catch (_) {
+    } catch (e) {
       _journeySearchResult = null;
+      _journeySearchError = e.toString().replaceAll('Exception: ', '');
     }
     _isSearchingJourneys = false;
     notifyListeners();
@@ -260,12 +268,37 @@ class TransitProvider with ChangeNotifier {
   }
 
   Future<Map<String, dynamic>> saveTrip(
-      String sourceStop, String destinationStop) async {
-    final res = await api.saveTrip(sourceStop, destinationStop);
-    if (res['ok'] == true) {
-      await loadSavedTrips();
+    String sourceStop,
+    String destinationStop, {
+    String? sourceStopId,
+    String? destinationStopId,
+    String? busId,
+    String? tripId,
+    String? boardingTime,
+    String? destinationTime,
+    List<String>? intermediateStops,
+    int? totalStops,
+  }) async {
+    try {
+      final res = await api.saveTrip(
+        sourceStop,
+        destinationStop,
+        sourceStopId: sourceStopId,
+        destinationStopId: destinationStopId,
+        busId: busId,
+        tripId: tripId,
+        boardingTime: boardingTime,
+        destinationTime: destinationTime,
+        intermediateStops: intermediateStops,
+        totalStops: totalStops,
+      );
+      if (res['ok'] == true) {
+        await loadSavedTrips();
+      }
+      return res;
+    } catch (e) {
+      return {'ok': false, 'message': e.toString().replaceAll('Exception: ', '')};
     }
-    return res;
   }
 
   Future<void> loadSavedTrips() async {
@@ -341,10 +374,12 @@ class TransitProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> selectBus(BusState bus) async {
+  Future<void> selectBus(BusState bus, {JourneyOption? journey}) async {
     _selectedBus = bus;
+    _selectedJourney = journey;
     _busUpcomingResponse = null;
     _currentForecasts = [];
+    _busDetailsError = null;
     _isLoadingUpcoming = true;
     notifyListeners();
     try {
@@ -352,13 +387,18 @@ class TransitProvider with ChangeNotifier {
       if (freshBus != null) {
         _selectedBus = freshBus;
       }
-      _busUpcomingResponse = await api.fetchBusUpcomingStops(bus.busId);
+      final tripIdToFetch = journey?.tripId ?? _selectedBus?.currentTripId;
+      _busUpcomingResponse = await api.fetchBusUpcomingStops(
+        bus.busId,
+        tripId: tripIdToFetch,
+      );
       _selectedBusLocation = await api.fetchBusLocation(bus.busId);
       final stopForPred = _busUpcomingResponse?.currentStopId.isNotEmpty == true
           ? _busUpcomingResponse!.currentStopId
           : (bus.lastStopId ?? 'S01');
       _currentForecasts = await api.fetchPredictions(bus.busId, stopForPred);
     } catch (e) {
+      _busDetailsError = e.toString().replaceAll('Exception: ', '');
       debugPrint('Error fetching bus details: $e');
     }
     _isLoadingUpcoming = false;

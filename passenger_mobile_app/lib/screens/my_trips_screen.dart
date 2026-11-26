@@ -76,9 +76,21 @@ class _MyTripsScreenState extends State<MyTripsScreen> {
                     )
                   else
                     ...savedTrips.map((trip) {
+                      final primaryJourney = trip.selectedJourney ??
+                          (trip.matchingBuses.isNotEmpty ? trip.matchingBuses.first : null);
                       return Card(
                         margin: const EdgeInsets.only(bottom: 14),
-                        child: Padding(
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(12),
+                          onTap: primaryJourney != null
+                              ? () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(builder: (_) => JourneyDetailsScreen(journey: primaryJourney)),
+                                  );
+                                }
+                              : null,
+                          child: Padding(
                           padding: const EdgeInsets.all(14),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -97,8 +109,17 @@ class _MyTripsScreenState extends State<MyTripsScreen> {
                                       ),
                                     ),
                                   ),
+                                  if (primaryJourney != null)
+                                    const Icon(Icons.chevron_right, color: MoveSyncTheme.teal),
                                 ],
                               ),
+                              if (trip.selectedBusId != null && trip.selectedBusId!.isNotEmpty) ...[
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Saved Bus: ${trip.selectedBusId}${trip.selectedTripId != null && trip.selectedTripId!.isNotEmpty ? " • Trip #${trip.selectedTripId}" : ""}',
+                                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: MoveSyncTheme.teal),
+                                ),
+                              ],
                               if (trip.intermediateStops.isNotEmpty) ...[
                                 const SizedBox(height: 6),
                                 Text(
@@ -147,6 +168,7 @@ class _MyTripsScreenState extends State<MyTripsScreen> {
                                 }),
                             ],
                           ),
+                        ),
                         ),
                       );
                     }),

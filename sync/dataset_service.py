@@ -214,8 +214,19 @@ class DatasetQueryService:
             on="trip_id",
             suffixes=("_src", "_dst"),
         )
-        # Keep latest trip per bus_id so each serving bus shows a clean, real trip option
-        merged = merged.sort_values("trip_id", ascending=False).drop_duplicates(subset=["bus_id"]).head(limit)
+        # Prefer each bus's active simulated trip if it serves both stops; otherwise latest trip per bus_id
+        active_trip_by_bus = {
+            b_id: int(snap["trip_id"]) for b_id, snap in self._bus_snapshots.items()
+        }
+        merged["is_active_trip"] = merged.apply(
+            lambda r: int(r["trip_id"]) == active_trip_by_bus.get(str(r["bus_id"]), -1),
+            axis=1,
+        )
+        merged = (
+            merged.sort_values(["is_active_trip", "trip_id"], ascending=[False, False])
+            .drop_duplicates(subset=["bus_id"])
+            .head(limit)
+        )
 
         journeys = []
         for _, r in merged.iterrows():
@@ -226,7 +237,8 @@ class DatasetQueryService:
                 "bus_id": str(r["bus_id"]),
                 "trip_id": int(r["trip_id"]),
                 "route_id": str(r["route_id"]),
-                "route_name": "KR Market → Anekal",
+                "route_name": f"{src['stop_name']} → {dst['stop_name']}",
+                "corridor_name": "KR Market → Anekal",
                 "boarding_stop": src["stop_name"],
                 "boarding_stop_id": src["stop_id"],
                 "boarding_sequence": src_seq,

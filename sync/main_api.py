@@ -206,6 +206,14 @@ class CountingSessionRequest(BaseModel):
 class SaveTripRequest(BaseModel):
     source_stop: str
     destination_stop: str
+    source_stop_id: Optional[str] = None
+    destination_stop_id: Optional[str] = None
+    bus_id: Optional[str] = None
+    trip_id: Optional[str] = None
+    boarding_time: Optional[str] = None
+    destination_time: Optional[str] = None
+    intermediate_stops: Optional[List[str]] = None
+    total_stops: Optional[int] = None
 
 class HardwareTelemetryPacket(BaseModel):
     bus_id: str
@@ -685,38 +693,69 @@ def search_journeys(
 
 @app.post("/api/trips/save")
 def save_trip(req: SaveTripRequest, session: UserSession = Depends(get_current_user)):
-    """Save a passenger's planned journey (source_stop -> destination_stop) to Firestore."""
+    """Save a passenger's planned journey segment (with optional selected bus/trip) to Firestore."""
     journey_res = dataset_service.search_journeys(req.source_stop, req.destination_stop)
-    trip_id = f"SAVED_{session.uid}_{int(time.time() * 1000)}"
+    if not journey_res.get("valid"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=journey_res.get("message", "Invalid journey segment."),
+        )
+    journeys = journey_res.get("journeys", [])
+    selected_journey = None
+    if req.bus_id:
+        selected_journey = next((j for j in journeys if j["bus_id"] == req.bus_id), None)
+    if selected_journey is None and journeys:
+        selected_journey = journeys[0]
+
+    saved_trip_id = f"SAVED_{session.uid}_{int(time.time() * 1000)}"
     doc = {
-        "saved_trip_id": trip_id,
+        "saved_trip_id": saved_trip_id,
         "uid": session.uid,
-        "source_stop": req.source_stop.strip(),
-        "destination_stop": req.destination_stop.strip(),
-        "valid": journey_res.get("valid", False),
+        "corridor_id": "KR_MARKET_ANEKAL_VIA_ECITY",
+        "source_stop": journey_res.get("source_stop", req.source_stop.strip()),
+        "source_stop_id": req.source_stop_id or (selected_journey["boarding_stop_id"] if selected_journey else ""),
+        "destination_stop": journey_res.get("destination_stop", req.destination_stop.strip()),
+        "destination_stop_id": req.destination_stop_id or (selected_journey["destination_stop_id"] if selected_journey else ""),
+        "bus_id": req.bus_id or (selected_journey["bus_id"] if selected_journey else None),
+        "trip_id": str(req.trip_id or (selected_journey["trip_id"] if selected_journey else "")),
+        "boarding_time": req.boarding_time or (selected_journey["boarding_time"] if selected_journey else ""),
+        "destination_time": req.destination_time or (selected_journey["destination_time"] if selected_journey else ""),
+        "intermediate_stops": req.intermediate_stops if req.intermediate_stops is not None else journey_res.get("intermediate_stops", []),
+        "total_stops": req.total_stops or (selected_journey["total_stops"] if selected_journey else 0),
+        "valid": True,
         "created_at": time.time(),
     }
-    bridge.db.collection("saved_trips").document(trip_id).set(doc)
+    bridge.db.collection("saved_trips").document(saved_trip_id).set(doc)
     return {"status": "success", "saved_trip": doc, "matching_journeys": journey_res}
 
 
 @app.get("/api/trips/saved")
 def get_saved_trips(session: UserSession = Depends(get_current_user)):
-    """Retrieve user's saved trips along with actual dataset matching buses for each saved journey."""
+    """Retrieve user's saved trips along with selected bus/trip and matching buses for each saved segment."""
     trips = []
     for doc in bridge.db.collection("saved_trips").stream():
         t = doc.to_dict()
         if t.get("uid") == session.uid:
             matches = dataset_service.search_journeys(t["source_stop"], t["destination_stop"])
+            matching_buses = matches.get("journeys", [])
+            sel_bus_id = t.get("bus_id")
+            sel_journey = None
+            if sel_bus_id:
+                sel_journey = next((j for j in matching_buses if j["bus_id"] == sel_bus_id), None)
+            if sel_journey is None and matching_buses:
+                sel_journey = matching_buses[0]
             trips.append({
                 "saved_trip_id": t["saved_trip_id"],
                 "source_stop": t["source_stop"],
                 "destination_stop": t["destination_stop"],
+                "selected_bus_id": sel_bus_id,
+                "selected_trip_id": t.get("trip_id"),
+                "selected_journey": sel_journey,
                 "created_at": t.get("created_at"),
                 "valid": matches.get("valid", False),
                 "message": matches.get("message"),
-                "intermediate_stops": matches.get("intermediate_stops", []),
-                "matching_buses": matches.get("journeys", []),
+                "intermediate_stops": t.get("intermediate_stops") or matches.get("intermediate_stops", []),
+                "matching_buses": matching_buses,
             })
     trips.sort(key=lambda x: float(x.get("created_at") or 0), reverse=True)
     return {"count": len(trips), "saved_trips": trips}

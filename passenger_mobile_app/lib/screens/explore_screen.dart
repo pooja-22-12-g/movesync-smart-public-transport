@@ -248,6 +248,20 @@ class _ExploreScreenState extends State<ExploreScreen> {
                   if (provider.isSearchingJourneys) ...[
                     const SizedBox(height: 12),
                     const Center(child: CircularProgressIndicator()),
+                  ] else if (provider.journeySearchError != null) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.red.shade50,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: MoveSyncTheme.red),
+                      ),
+                      child: Text(
+                        'Search error: ${provider.journeySearchError}',
+                        style: const TextStyle(fontSize: 13, color: MoveSyncTheme.red),
+                      ),
+                    ),
                   ] else if (provider.journeySearchResult != null) ...[
                     const SizedBox(height: 14),
                     Builder(
@@ -306,10 +320,10 @@ class _ExploreScreenState extends State<ExploreScreen> {
                                     backgroundColor: color.withValues(alpha: 0.14),
                                     child: Icon(Icons.directions_bus, color: color, size: 20),
                                   ),
-                                  title: Text('${j.busId} • KR Market → Anekal • ${j.crowdStatus}',
+                                  title: Text('${j.busId} • ${j.boardingStop} → ${j.destinationStop}',
                                       style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                                   subtitle: Text(
-                                    '${j.boardingStop} (${j.boardingTime}) → ${j.destinationStop} (${j.destinationTime})\n'
+                                    '${j.boardingTime} → ${j.destinationTime} • ${j.crowdStatus}\n'
                                     '$totalStops stops • ${j.currentOccupancy}/${j.busCapacity} occupied • $avail seats free',
                                     style: const TextStyle(fontSize: 12),
                                   ),

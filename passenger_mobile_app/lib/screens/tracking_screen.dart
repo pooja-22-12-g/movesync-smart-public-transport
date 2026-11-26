@@ -144,22 +144,26 @@ class _TrackingScreenState extends State<TrackingScreen> {
                           children: [
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(activeBus.busId, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.bold, color: MoveSyncTheme.navy)),
-                                    Text(
-                                      'Route ${activeBus.currentRouteId ?? "Depot"} • ${isSimulatedLoc ? "Dataset / Simulated Location" : "Live GPS"}',
-                                      style: const TextStyle(fontSize: 12, color: Colors.black54),
-                                    ),
-                                    if (upcomingResp != null)
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(activeBus.busId, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.bold, color: MoveSyncTheme.navy)),
                                       Text(
-                                        'Current Stop: ${upcomingResp.currentStopName} (#${upcomingResp.currentStopSequence})',
-                                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: MoveSyncTheme.teal),
+                                        'Route ${activeBus.currentRouteId ?? "Depot"} • ${isSimulatedLoc ? "Dataset / Simulated Location" : "Live GPS"}',
+                                        style: const TextStyle(fontSize: 12, color: Colors.black54),
                                       ),
-                                  ],
+                                      if (upcomingResp != null)
+                                        Text(
+                                          'Current Stop: ${upcomingResp.currentStopName} (#${upcomingResp.currentStopSequence})',
+                                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: MoveSyncTheme.teal),
+                                        ),
+                                    ],
+                                  ),
                                 ),
+                                const SizedBox(width: 8),
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                                   decoration: BoxDecoration(
@@ -202,6 +206,52 @@ class _TrackingScreenState extends State<TrackingScreen> {
                 ),
                 const SizedBox(height: 16),
 
+                // Selected Journey Segment Banner (if opened from a passenger journey)
+                if (provider.selectedJourney != null && provider.selectedJourney!.busId == activeBus.busId) ...[
+                  Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: MoveSyncTheme.teal.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: MoveSyncTheme.teal),
+                    ),
+                    child: Text(
+                      'Your Journey: ${provider.selectedJourney!.boardingStop} → ${provider.selectedJourney!.destinationStop} (Trip #${provider.selectedJourney!.tripId})',
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: MoveSyncTheme.navy),
+                    ),
+                  ),
+                ],
+                // Error Banner if Upcoming Stops / Predictions failed
+                if (provider.busDetailsError != null) ...[
+                  Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.red.shade50,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: MoveSyncTheme.red),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.error_outline, color: MoveSyncTheme.red),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Failed to load live bus predictions: ${provider.busDetailsError}',
+                            style: const TextStyle(fontSize: 12, color: MoveSyncTheme.red),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () => provider.selectBus(activeBus, journey: provider.selectedJourney),
+                          child: const Text('Retry'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 // Upcoming Stops & ML Occupancy Prediction in Route Sequence
                 const Text('Occupancy Prediction & Upcoming Stops', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: MoveSyncTheme.navy)),
                 const SizedBox(height: 2),

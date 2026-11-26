@@ -292,18 +292,40 @@ class ApiService {
     if (response.statusCode == 200) {
       return JourneySearchResult.fromJson(jsonDecode(response.body));
     }
-    return null;
+    throw Exception('Journey search failed (${response.statusCode})');
   }
 
   Future<Map<String, dynamic>> saveTrip(
-      String sourceStop, String destinationStop) async {
+    String sourceStop,
+    String destinationStop, {
+    String? sourceStopId,
+    String? destinationStopId,
+    String? busId,
+    String? tripId,
+    String? boardingTime,
+    String? destinationTime,
+    List<String>? intermediateStops,
+    int? totalStops,
+  }) async {
+    if (authToken == null || authToken!.isEmpty) {
+      return {'ok': false, 'message': 'Authentication required. Please sign in again.'};
+    }
+    final payload = <String, dynamic>{
+      'source_stop': sourceStop.trim(),
+      'destination_stop': destinationStop.trim(),
+      if (sourceStopId != null) 'source_stop_id': sourceStopId,
+      if (destinationStopId != null) 'destination_stop_id': destinationStopId,
+      if (busId != null) 'bus_id': busId,
+      if (tripId != null) 'trip_id': tripId,
+      if (boardingTime != null) 'boarding_time': boardingTime,
+      if (destinationTime != null) 'destination_time': destinationTime,
+      if (intermediateStops != null) 'intermediate_stops': intermediateStops,
+      if (totalStops != null) 'total_stops': totalStops,
+    };
     final response = await http.post(
       Uri.parse('$baseUrl/api/trips/save'),
       headers: _headers,
-      body: jsonEncode({
-        'source_stop': sourceStop.trim(),
-        'destination_stop': destinationStop.trim(),
-      }),
+      body: jsonEncode(payload),
     );
     Map<String, dynamic> body = {};
     try {
@@ -342,15 +364,18 @@ class ApiService {
     return null;
   }
 
-  Future<BusUpcomingResponse?> fetchBusUpcomingStops(String busId) async {
-    final response = await http.get(
-      Uri.parse('$baseUrl/api/buses/$busId/upcoming-stops'),
-      headers: _headers,
+  Future<BusUpcomingResponse?> fetchBusUpcomingStops(
+    String busId, {
+    String? tripId,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/buses/$busId/upcoming-stops').replace(
+      queryParameters: (tripId != null && tripId.isNotEmpty) ? {'trip_id': tripId} : null,
     );
+    final response = await http.get(uri, headers: _headers);
     if (response.statusCode == 200) {
       return BusUpcomingResponse.fromJson(jsonDecode(response.body));
     }
-    return null;
+    throw Exception('Failed to load upcoming stops (${response.statusCode})');
   }
 }
 

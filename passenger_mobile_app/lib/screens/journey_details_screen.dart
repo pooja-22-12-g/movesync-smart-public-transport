@@ -18,11 +18,22 @@ class _JourneyDetailsScreenState extends State<JourneyDetailsScreen> {
   bool _isSaving = false;
 
   Future<void> _saveTrip() async {
+    if (_isSaving) return;
     setState(() => _isSaving = true);
+    final j = widget.journey;
+    final allStopsCount = j.intermediateStops.length + 2;
     final provider = Provider.of<TransitProvider>(context, listen: false);
     final res = await provider.saveTrip(
-      widget.journey.boardingStop,
-      widget.journey.destinationStop,
+      j.boardingStop,
+      j.destinationStop,
+      sourceStopId: j.boardingStopId,
+      destinationStopId: j.destinationStopId,
+      busId: j.busId,
+      tripId: j.tripId,
+      boardingTime: j.boardingTime,
+      destinationTime: j.destinationTime,
+      intermediateStops: j.intermediateStops,
+      totalStops: allStopsCount,
     );
     if (!mounted) return;
     setState(() => _isSaving = false);
@@ -30,7 +41,7 @@ class _JourneyDetailsScreenState extends State<JourneyDetailsScreen> {
       SnackBar(
         content: Text(
           res['ok'] == true
-              ? 'Saved trip: ${widget.journey.boardingStop} → ${widget.journey.destinationStop}'
+              ? 'Saved trip: ${j.boardingStop} → ${j.destinationStop} (${j.busId})'
               : (res['message']?.toString() ?? 'Failed to save trip'),
         ),
         backgroundColor: res['ok'] == true ? MoveSyncTheme.green : MoveSyncTheme.red,
@@ -89,9 +100,13 @@ class _JourneyDetailsScreenState extends State<JourneyDetailsScreen> {
                     ],
                   ),
                   const SizedBox(height: 4),
-                  const Text(
-                    'Route: KR Market → Anekal (KR_MARKET_ANEKAL_VIA_ECITY)',
-                    style: TextStyle(fontSize: 12, color: MoveSyncTheme.teal, fontWeight: FontWeight.w600),
+                  Text(
+                    '${j.boardingStop} → ${j.destinationStop}',
+                    style: const TextStyle(fontSize: 14, color: MoveSyncTheme.teal, fontWeight: FontWeight.bold),
+                  ),
+                  Text(
+                    'Corridor: ${j.corridorName} (${j.routeId}) • Trip #${j.tripId}',
+                    style: const TextStyle(fontSize: 11, color: Colors.black54),
                   ),
                   const Divider(height: 20),
                   Row(
@@ -157,14 +172,15 @@ class _JourneyDetailsScreenState extends State<JourneyDetailsScreen> {
                                       ? 'CRITICAL'
                                       : (j.occupancyPct >= 75 ? 'WARNING' : 'NORMAL'),
                                   currentRouteId: j.routeId,
-                                  routeName: 'KR Market → Anekal',
+                                  routeName: '${j.boardingStop} → ${j.destinationStop}',
                                   lastStopId: j.boardingStopId,
                                   lastStopName: j.boardingStop,
+                                  currentTripId: j.tripId,
                                   status: 'IN_SERVICE',
                                   isReliefBus: false,
                                   dataProvenance: j.dataProvenance,
                                 );
-                            await provider.selectBus(bus);
+                            await provider.selectBus(bus, journey: j);
                             if (context.mounted) {
                               Navigator.push(
                                 context,

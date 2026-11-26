@@ -443,6 +443,8 @@ class JourneyOption {
   final String busId;
   final String tripId;
   final String routeId;
+  final String routeName;
+  final String corridorName;
   final String boardingStop;
   final String boardingStopId;
   final int boardingSequence;
@@ -453,15 +455,19 @@ class JourneyOption {
   final String destinationTime;
   final int currentOccupancy;
   final int busCapacity;
+  final int availableSeats;
   final double occupancyPct;
   final String crowdStatus;
   final List<String> intermediateStops;
+  final int totalStops;
   final String dataProvenance;
 
   JourneyOption({
     required this.busId,
     required this.tripId,
     required this.routeId,
+    required this.routeName,
+    required this.corridorName,
     required this.boardingStop,
     required this.boardingStopId,
     required this.boardingSequence,
@@ -472,33 +478,50 @@ class JourneyOption {
     required this.destinationTime,
     required this.currentOccupancy,
     required this.busCapacity,
+    required this.availableSeats,
     required this.occupancyPct,
     required this.crowdStatus,
     required this.intermediateStops,
+    required this.totalStops,
     required this.dataProvenance,
   });
 
   factory JourneyOption.fromJson(Map<String, dynamic> json) {
+    final bStop = (json['boarding_stop'] ?? '').toString();
+    final dStop = (json['destination_stop'] ?? '').toString();
+    final bSeq = (json['boarding_sequence'] is num) ? (json['boarding_sequence'] as num).toInt() : 0;
+    final dSeq = (json['destination_sequence'] is num) ? (json['destination_sequence'] as num).toInt() : 0;
+    final cap = (json['bus_capacity'] is num) ? (json['bus_capacity'] as num).toInt() : 60;
+    final occ = (json['current_occupancy'] is num) ? (json['current_occupancy'] as num).toInt() : 0;
+    final inter = List<String>.from(json['intermediate_stops'] ?? []);
     return JourneyOption(
       busId: (json['bus_id'] ?? '').toString(),
       tripId: (json['trip_id'] ?? '').toString(),
-      routeId: json['route_id'] ?? '',
-      boardingStop: json['boarding_stop'] ?? '',
-      boardingStopId: json['boarding_stop_id'] ?? '',
-      boardingSequence: json['boarding_sequence'] ?? 0,
-      destinationStop: json['destination_stop'] ?? '',
-      destinationStopId: json['destination_stop_id'] ?? '',
-      destinationSequence: json['destination_sequence'] ?? 0,
-      boardingTime: json['boarding_time'] ?? '',
-      destinationTime: json['destination_time'] ?? '',
-      currentOccupancy: json['current_occupancy'] ?? 0,
-      busCapacity: json['bus_capacity'] ?? 60,
+      routeId: (json['route_id'] ?? '').toString(),
+      routeName: (json['route_name'] ?? '$bStop → $dStop').toString(),
+      corridorName: (json['corridor_name'] ?? 'KR Market → Anekal').toString(),
+      boardingStop: bStop,
+      boardingStopId: (json['boarding_stop_id'] ?? '').toString(),
+      boardingSequence: bSeq,
+      destinationStop: dStop,
+      destinationStopId: (json['destination_stop_id'] ?? '').toString(),
+      destinationSequence: dSeq,
+      boardingTime: (json['boarding_time'] ?? '').toString(),
+      destinationTime: (json['destination_time'] ?? '').toString(),
+      currentOccupancy: occ,
+      busCapacity: cap,
+      availableSeats: (json['available_seats'] is num)
+          ? (json['available_seats'] as num).toInt()
+          : (cap - occ).clamp(0, cap),
       occupancyPct: (json['occupancy_pct'] is num)
           ? (json['occupancy_pct'] as num).toDouble()
           : 0.0,
-      crowdStatus: json['crowd_status'] ?? 'Low',
-      intermediateStops: List<String>.from(json['intermediate_stops'] ?? []),
-      dataProvenance: json['data_provenance'] ?? 'DATASET_HISTORICAL_SIMULATION',
+      crowdStatus: (json['crowd_status'] ?? 'Low').toString(),
+      intermediateStops: inter,
+      totalStops: (json['total_stops'] is num)
+          ? (json['total_stops'] as num).toInt()
+          : (dSeq > bSeq && bSeq > 0 ? dSeq - bSeq + 1 : inter.length + 2),
+      dataProvenance: (json['data_provenance'] ?? 'DATASET_HISTORICAL_SIMULATION').toString(),
     );
   }
 }
@@ -540,6 +563,9 @@ class SavedTrip {
   final String savedTripId;
   final String sourceStop;
   final String destinationStop;
+  final String? selectedBusId;
+  final String? selectedTripId;
+  final JourneyOption? selectedJourney;
   final String createdAt;
   final bool valid;
   final String? message;
@@ -550,6 +576,9 @@ class SavedTrip {
     required this.savedTripId,
     required this.sourceStop,
     required this.destinationStop,
+    this.selectedBusId,
+    this.selectedTripId,
+    this.selectedJourney,
     required this.createdAt,
     required this.valid,
     this.message,
@@ -559,13 +588,17 @@ class SavedTrip {
 
   factory SavedTrip.fromJson(Map<String, dynamic> json) {
     final rawBuses = json['matching_buses'] as List? ?? [];
+    final rawSel = json['selected_journey'];
     return SavedTrip(
-      savedTripId: json['saved_trip_id'] ?? '',
-      sourceStop: json['source_stop'] ?? '',
-      destinationStop: json['destination_stop'] ?? '',
-      createdAt: json['created_at'] ?? '',
+      savedTripId: (json['saved_trip_id'] ?? '').toString(),
+      sourceStop: (json['source_stop'] ?? '').toString(),
+      destinationStop: (json['destination_stop'] ?? '').toString(),
+      selectedBusId: json['selected_bus_id']?.toString(),
+      selectedTripId: json['selected_trip_id']?.toString(),
+      selectedJourney: rawSel is Map<String, dynamic> ? JourneyOption.fromJson(rawSel) : null,
+      createdAt: (json['created_at'] ?? '').toString(),
       valid: json['valid'] ?? true,
-      message: json['message'],
+      message: json['message']?.toString(),
       intermediateStops: List<String>.from(json['intermediate_stops'] ?? []),
       matchingBuses: rawBuses.map((j) => JourneyOption.fromJson(j)).toList(),
     );
