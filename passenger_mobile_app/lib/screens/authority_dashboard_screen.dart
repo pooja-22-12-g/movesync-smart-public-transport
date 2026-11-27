@@ -264,10 +264,15 @@ class _AuthorityDashboardScreenState extends State<AuthorityDashboardScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('${alert.busId} • Route ${alert.routeId}',
-                              style: const TextStyle(fontWeight: FontWeight.bold, color: MoveSyncTheme.navy)),
+                          Expanded(
+                            child: Text(
+                              '${alert.busId} • Route ${alert.routeId}',
+                              style: const TextStyle(fontWeight: FontWeight.bold, color: MoveSyncTheme.navy),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
                           Chip(
                             label: Text(alert.alertStatus, style: TextStyle(color: statusColor, fontSize: 11, fontWeight: FontWeight.bold)),
                             backgroundColor: statusColor.withValues(alpha: 0.12),
@@ -280,35 +285,39 @@ class _AuthorityDashboardScreenState extends State<AuthorityDashboardScreen> {
                       Text('${isCrit ? "Critical" : "Warning"}: ${alert.currentOccupancy}/${alert.capacity} (${alert.occupancyPct}%)'),
                       if (!isResolved) ...[
                         const SizedBox(height: 8),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            if (!isAck)
-                              OutlinedButton(
+                        SizedBox(
+                          width: double.infinity,
+                          child: Wrap(
+                            alignment: WrapAlignment.end,
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              if (!isAck)
+                                OutlinedButton(
+                                  onPressed: () async {
+                                    final res = await provider.acknowledgeAlert(alert.alertId);
+                                    if (mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(content: Text(res['message']?.toString() ?? 'Acknowledged')),
+                                      );
+                                    }
+                                  },
+                                  child: const Text('Acknowledge'),
+                                ),
+                              ElevatedButton(
+                                style: ElevatedButton.styleFrom(backgroundColor: MoveSyncTheme.teal),
                                 onPressed: () async {
-                                  final res = await provider.acknowledgeAlert(alert.alertId);
+                                  final res = await provider.resolveAlert(alert.alertId);
                                   if (mounted) {
                                     ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(content: Text(res['message']?.toString() ?? 'Acknowledged')),
+                                      SnackBar(content: Text(res['message']?.toString() ?? 'Resolution checked')),
                                     );
                                   }
                                 },
-                                child: const Text('Acknowledge'),
+                                child: const Text('Verify & Resolve'),
                               ),
-                            const SizedBox(width: 8),
-                            ElevatedButton(
-                              style: ElevatedButton.styleFrom(backgroundColor: MoveSyncTheme.teal),
-                              onPressed: () async {
-                                final res = await provider.resolveAlert(alert.alertId);
-                                if (mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(content: Text(res['message']?.toString() ?? 'Resolution checked')),
-                                  );
-                                }
-                              },
-                              child: const Text('Verify & Resolve'),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ],
                     ],
@@ -342,9 +351,12 @@ class _AuthorityDashboardScreenState extends State<AuthorityDashboardScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('Route ${d.routeId} • ${d.priority}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                            Expanded(
+                              child: Text('Route ${d.routeId} • ${d.priority}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                            ),
+                            const SizedBox(width: 8),
                             Chip(label: Text(d.authorityDecision), visualDensity: VisualDensity.compact),
                           ],
                         ),
@@ -352,20 +364,24 @@ class _AuthorityDashboardScreenState extends State<AuthorityDashboardScreen> {
                         Text('Target Bus: ${d.sourceBusId} → Relief: ${d.recommendedReliefBusId}',
                             style: const TextStyle(fontSize: 12, color: Colors.black54)),
                         const SizedBox(height: 8),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            OutlinedButton(
-                              onPressed: () => provider.decideDispatch(d.recommendationId, 'REJECTED'),
-                              child: const Text('Reject'),
-                            ),
-                            const SizedBox(width: 8),
-                            ElevatedButton(
-                              style: ElevatedButton.styleFrom(backgroundColor: MoveSyncTheme.green),
-                              onPressed: () => provider.decideDispatch(d.recommendationId, 'APPROVED'),
-                              child: const Text('Approve Dispatch'),
-                            ),
-                          ],
+                        SizedBox(
+                          width: double.infinity,
+                          child: Wrap(
+                            alignment: WrapAlignment.end,
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              OutlinedButton(
+                                onPressed: () => provider.decideDispatch(d.recommendationId, 'REJECTED'),
+                                child: const Text('Reject'),
+                              ),
+                              ElevatedButton(
+                                style: ElevatedButton.styleFrom(backgroundColor: MoveSyncTheme.green),
+                                onPressed: () => provider.decideDispatch(d.recommendationId, 'APPROVED'),
+                                child: const Text('Approve Dispatch'),
+                              ),
+                            ],
+                          ),
                         ),
                       ],
                     ),

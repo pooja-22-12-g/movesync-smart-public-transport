@@ -117,13 +117,22 @@ class _LoginScreenState extends State<LoginScreen> {
                           children: [
                             Expanded(
                               child: ChoiceChip(
-                                label: const Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(Icons.person_outline, size: 16),
-                                    SizedBox(width: 6),
-                                    Text('Passenger Login'),
-                                  ],
+                                showCheckmark: false,
+                                labelPadding: const EdgeInsets.symmetric(horizontal: 6),
+                                label: const SizedBox(
+                                  width: double.infinity,
+                                  child: FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        Icon(Icons.person_outline, size: 16),
+                                        SizedBox(width: 5),
+                                        Text('Passenger Login'),
+                                      ],
+                                    ),
+                                  ),
                                 ),
                                 selected: !_isAuthorityMode,
                                 selectedColor: MoveSyncTheme.teal.withValues(alpha: 0.18),
@@ -135,13 +144,22 @@ class _LoginScreenState extends State<LoginScreen> {
                             const SizedBox(width: 8),
                             Expanded(
                               child: ChoiceChip(
-                                label: const Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(Icons.admin_panel_settings_outlined, size: 16),
-                                    SizedBox(width: 6),
-                                    Text('Authority Login'),
-                                  ],
+                                showCheckmark: false,
+                                labelPadding: const EdgeInsets.symmetric(horizontal: 6),
+                                label: const SizedBox(
+                                  width: double.infinity,
+                                  child: FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        Icon(Icons.admin_panel_settings_outlined, size: 16),
+                                        SizedBox(width: 5),
+                                        Text('Authority Login'),
+                                      ],
+                                    ),
+                                  ),
                                 ),
                                 selected: _isAuthorityMode,
                                 selectedColor: MoveSyncTheme.navy.withValues(alpha: 0.18),

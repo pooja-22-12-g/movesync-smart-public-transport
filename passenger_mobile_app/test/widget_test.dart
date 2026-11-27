@@ -4,13 +4,17 @@ import 'package:provider/provider.dart';
 import 'package:passenger_mobile_app/main.dart';
 import 'package:passenger_mobile_app/models/transit_models.dart';
 import 'package:passenger_mobile_app/providers/transit_provider.dart';
+import 'package:passenger_mobile_app/screens/authority_dashboard_screen.dart';
 import 'package:passenger_mobile_app/screens/journey_details_screen.dart';
+import 'package:passenger_mobile_app/screens/login_screen.dart';
 import 'package:passenger_mobile_app/screens/my_trips_screen.dart';
 import 'package:passenger_mobile_app/screens/tracking_screen.dart';
 
 class _FakeTransitProvider extends TransitProvider {
   BusUpcomingResponse? _fakeUpcoming;
   List<SavedTrip> _fakeSaved = [];
+  List<CrowdingAlert> _fakeAlerts = [];
+  List<DispatchRecommendation> _fakeDispatches = [];
 
   void setFakeUpcoming(BusUpcomingResponse resp) {
     _fakeUpcoming = resp;
@@ -20,11 +24,28 @@ class _FakeTransitProvider extends TransitProvider {
     _fakeSaved = trips;
   }
 
+  void setFakeAlerts(List<CrowdingAlert> alerts) {
+    _fakeAlerts = alerts;
+  }
+
+  void setFakeDispatches(List<DispatchRecommendation> dispatches) {
+    _fakeDispatches = dispatches;
+  }
+
   @override
   BusUpcomingResponse? get busUpcomingResponse => _fakeUpcoming;
 
   @override
   List<SavedTrip> get savedTrips => _fakeSaved;
+
+  @override
+  List<CrowdingAlert> get alertHistory => _fakeAlerts;
+
+  @override
+  List<CrowdingAlert> get alerts => _fakeAlerts;
+
+  @override
+  List<DispatchRecommendation> get pendingDispatches => _fakeDispatches;
 
   @override
   bool get isLoadingUpcoming => false;
@@ -209,5 +230,76 @@ void main() {
 
     expect(find.text('KA-BUS-007 • Journey Details'), findsOneWidget);
     expect(find.text('Singasandra'), findsOneWidget);
+  });
+
+  testWidgets('LoginScreen fits narrow 320px width without RenderFlex overflow', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(320, 640);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<TransitProvider>(
+        create: (_) => _FakeTransitProvider(),
+        child: const MaterialApp(home: LoginScreen()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Passenger Login'), findsOneWidget);
+    expect(find.text('Authority Login'), findsOneWidget);
+  });
+
+  testWidgets('AuthorityDashboardScreen Alerts and Dispatch tabs fit narrow 320px width without overflow', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(320, 640);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final fakeProvider = _FakeTransitProvider();
+    fakeProvider.setFakeAlerts([
+      CrowdingAlert.fromJson({
+        'alert_id': 'ALERT_KA-BUS-006_S24_VERY_LONG_ID',
+        'bus_id': 'KA-BUS-006',
+        'route_id': 'KR_MARKET_ANEKAL_VIA_ECITY',
+        'alert_level': 'CRITICAL',
+        'current_occupancy': 58,
+        'capacity': 60,
+        'occupancy_pct': 96.7,
+        'alert_status': 'ACTIVE',
+      }),
+    ]);
+    fakeProvider.setFakeDispatches([
+      DispatchRecommendation.fromJson({
+        'recommendation_id': 'DISP_KMA_001',
+        'route_id': 'KR_MARKET_ANEKAL_VIA_ECITY',
+        'source_bus_id': 'KA-BUS-006',
+        'recommended_relief_bus_id': 'KA-BUS-019',
+        'priority': 'CRITICAL',
+        'recommended_action': 'Deploy relief unit KA-BUS-019 on KR Market -> Anekal corridor',
+        'authority_decision': 'PENDING',
+      }),
+    ]);
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<TransitProvider>.value(
+        value: fakeProvider,
+        child: const MaterialApp(home: AuthorityDashboardScreen()),
+      ),
+    );
+    await tester.pump();
+
+    // Switch to Alerts tab
+    await tester.tap(find.text('Alerts'));
+    await tester.pumpAndSettle();
+    expect(find.text('Acknowledge'), findsOneWidget);
+    expect(find.text('Verify & Resolve'), findsOneWidget);
+    expect(find.text('ACTIVE'), findsOneWidget);
+
+    // Switch to Dispatch tab
+    await tester.tap(find.text('Dispatch'));
+    await tester.pumpAndSettle();
+    expect(find.text('Reject'), findsOneWidget);
+    expect(find.text('Approve Dispatch'), findsOneWidget);
   });
 }
